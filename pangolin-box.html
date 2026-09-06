@@ -35,8 +35,8 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v0.9</p>
-  <p>Your phone is a window into a foot-deep box. Tip the phone's top edge toward you to roll things toward the glass. Tip it sideways to steer.</p>
+  <p style="font-size:13px;opacity:.7">v1.0</p>
+  <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
   <p style="font-size:13px;opacity:.8">On a desktop, use arrow keys or drag.</p>
@@ -46,16 +46,18 @@
 const W=6, D=12; let H=12;       // box width, depth (inches); height follows the screen aspect
 const cv=document.getElementById('c'), ctx=cv.getContext('2d');
 const msg=document.getElementById('msg');
-let tilt={x:0,z:0};             // gravity components on floor plane, -1..1
-let base=null;                  // calibrated orientation
-let S;                          // game state
+let grav={x:0,y:1,z:0};          // gravity direction in box frame: x right, y down (screen), z into the box
+let flick={x:0,y:0,z:0};
+let base=null;                   // set once orientation events arrive
+let S;
+const ball=(x,y,z,r,extra)=>Object.assign({x,y,z,vx:0,vy:0,vz:0,r},extra||{});
 function newState(){
   return {
-    pang:{x:0,z:D-1.2,vx:0,vz:0,r:.45,rolling:false,alive:true},
+    pang:ball(0,0,D-1.2,.45,{rolling:false,alive:true,pinned:true}),
     boulders:[], stock:3,
-    marbles:[{x:-1.5,z:10.5},{x:1.8,z:9.6},{x:0.4,z:6.5},{x:-2,z:4},{x:2.2,z:2.2}].map(m=>({...m,vx:0,vz:0,r:.22})),
+    marbles:[[-1.5,10.5],[1.8,9.6],[.4,6.5],[-2,4],[2.2,2.2]].map(([x,z])=>ball(x,0,z,.22)),
     barriers:[{z:8.5,hp:1},{z:5,hp:1}],
-    robots:[{x:-1.6,z:7,on:true},{x:1.5,z:3.2,on:true}],
+    robots:[ball(-1.6,0,7,.5,{on:true}),ball(1.5,0,3.2,.5,{on:true})],
     won:false, t:0
   };
 }
@@ -65,31 +67,29 @@ S=newState();
 let cw,ch,cx,cy,K;
 function resize(){
   cw=cv.width=cv.clientWidth*devicePixelRatio; ch=cv.height=cv.clientHeight*devicePixelRatio;
-  cx=cw/2; cy=ch/2; K=cw/W; H=ch/K;   // near face of the box = the screen edges
+  cx=cw/2; cy=ch/2; K=cw/W; H=ch/K;
+  // spawn heights: bodies start resting on the floor for an upright box
+  const floorY=H/2; for(const b of [...S.marbles,...S.robots,S.pang]) if(b.y===0) b.y=floorY-b.r;
 }
 window.addEventListener('resize',resize); resize();
-const F=7;                       // focal length in inches
+const F=7;
 function P(x,y,z){ const s=F/(F+z); return [cx+x*s*K, cy+y*s*K, s]; }
 
 // ---------- input ----------
 let ori={a:0,b:90,g:0};
-function onOri(e){
-  if(e.beta==null) return; ori={a:e.alpha||0,b:e.beta,g:e.gamma||0};
-  if(!base) base={b:e.beta,g:e.gamma};
-  const db=(e.beta-base.b)*Math.PI/180, dg=(e.gamma-base.g)*Math.PI/180;
-  tilt.z=Math.max(-1,Math.min(1,-Math.sin(db)*1.6)); // top edge toward you => things roll to viewport (z decreasing)
-  tilt.x=Math.max(-1,Math.min(1, Math.sin(dg)*1.6));
-}
+function onOri(e){ if(e.beta==null) return; base=true; ori={a:e.alpha||0,b:e.beta,g:e.gamma||0}; }
+function onMotion(e){ const a=e.acceleration; if(!a||a.x==null) return;
+  // device accel (m/s^2) -> box frame, in inches; objects feel the opposite of the box's acceleration
+  const k=39.37; flick={x:-a.x*k, y:a.y*k, z:a.z*k}; }
 const keys={};
 addEventListener('keydown',e=>{keys[e.key]=1; if(e.key===' ')dropBoulder(); if(e.key==='r')toggleMode();});
 addEventListener('keyup',e=>{keys[e.key]=0});
-let drag=null, viewYaw=0, viewPitch=0;
+let drag=null, viewYaw=0, viewPitch=0, kb={x:0,z:0};
 cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY}});
-addEventListener('pointerup',()=>{drag=null; if(!base) tilt={x:0,z:0}});
-addEventListener('pointermove',e=>{ if(!drag) return;
-  tilt.x=Math.max(-1,Math.min(1,(e.clientX-drag.x)/120));
-  tilt.z=Math.max(-1,Math.min(1,(e.clientY-drag.y)/120));
-  if(!base){ viewYaw=(e.clientX-drag.x)/6; viewPitch=-(e.clientY-drag.y)/6; } });
+addEventListener('pointerup',()=>{drag=null});
+addEventListener('pointermove',e=>{ if(!drag||base) return;
+  kb.x=Math.max(-1,Math.min(1,(e.clientX-drag.x)/120)); kb.z=Math.max(-1,Math.min(1,(e.clientY-drag.y)/120));
+  viewYaw=(e.clientX-drag.x)/6; viewPitch=-(e.clientY-drag.y)/6; });
 
 document.getElementById('start').onclick=async()=>{
   let status='';
@@ -98,7 +98,8 @@ document.getElementById('start').onclick=async()=>{
     else if(DeviceOrientationEvent.requestPermission){
       const r=await DeviceOrientationEvent.requestPermission();
       if(r==='granted') addEventListener('deviceorientation',onOri); else status='Tilt denied: clear site data in Settings > Safari and retry';
-    } else addEventListener('deviceorientation',onOri);
+      try{ if(DeviceMotionEvent.requestPermission && (await DeviceMotionEvent.requestPermission())==='granted') addEventListener('devicemotion',onMotion); }catch(e){}
+    } else { addEventListener('deviceorientation',onOri); addEventListener('devicemotion',onMotion); }
   }catch(e){ status='Tilt blocked: '+e.message; }
   document.getElementById('big').style.display='none';
   if(status) say(status);
@@ -109,79 +110,30 @@ document.getElementById('big').style.display='flex';
 const dropBtn=document.getElementById('drop'), modeBtn=document.getElementById('mode');
 function dropBoulder(){
   const p=S.pang; if(p.rolling||S.stock<=0||!p.alive||S.won) return;
-  S.stock--; S.boulders.push({x:p.x,z:p.z-.9,vx:0,vz:-.5,r:.4});
+  S.stock--; S.boulders.push(ball(p.x,p.y,p.z-.9,.4));
   dropBtn.textContent=`Lay boulder (${S.stock})`;
 }
 function toggleMode(){
   const p=S.pang; if(!p.alive||S.won) return;
-  p.rolling=!p.rolling; modeBtn.classList.toggle('on',p.rolling);
+  p.rolling=!p.rolling; p.pinned=!p.rolling; modeBtn.classList.toggle('on',p.rolling);
   modeBtn.textContent=p.rolling?'Uncurl & walk':'Curl & roll';
 }
 dropBtn.onclick=dropBoulder; modeBtn.onclick=toggleMode;
-document.getElementById('reset').onclick=()=>{S=newState(); base=null; sm=null; dropBtn.textContent='Lay boulder (3)'; modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); say('');};
+document.getElementById('reset').onclick=()=>{S=newState(); resize(); sm=null; dropBtn.textContent='Lay boulder (3)'; modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); say('');};
 function say(t){msg.textContent=t}
 
-// ---------- physics ----------
-const G=28;
-function stepBody(b,dt,fric){
-  b.vx+=tilt.x*G*dt; b.vz+=tilt.z*G*dt;
-  b.vx*=fric; b.vz*=fric;
-  b.x+=b.vx*dt; b.z+=b.vz*dt;
-  const lim=W/2-b.r;
-  if(b.x<-lim){b.x=-lim;b.vx*=-.4} if(b.x>lim){b.x=lim;b.vx*=-.4}
-  if(b.z>D-b.r){b.z=D-b.r;b.vz*=-.4}
-  if(b.z<b.r){b.z=b.r;b.vz*=-.4}
-}
-function update(dt){
-  if(S.won) return; S.t+=dt;
-  if(!base && !drag){ // keyboard fallback
-    tilt.x=(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0);
-    tilt.z=(keys.ArrowUp?-1:0)+(keys.ArrowDown?1:0);
-  }
-  // boulders
-  for(const b of S.boulders){
-    stepBody(b,dt,.995);
-    for(const w of S.barriers) if(w.hp>0 && b.z<w.z+.3 && b.z>w.z-.3){
-      if(Math.abs(b.vz)>3){w.hp=0; b.vz*=.35; say('Barrier smashed')}
-      else { b.z=b.vz<0? w.z+.3 : w.z-.3; b.vz*=-.3; }
-    }
-    for(const r of S.robots) if(r.on && Math.hypot(r.x-b.x,r.z-b.z)<b.r+.5){ r.on=false; b.vz*=.5; say('Robot decommissioned') }
-  }
-  for(const m of S.marbles){
-    stepBody(m,dt,.997);
-    for(const w of S.barriers) if(w.hp>0 && Math.abs(m.z-w.z)<.3){ m.z=m.vz<0? w.z+.3 : w.z-.3; m.vz*=-.5; }
-    for(const r of S.robots){ const dx=m.x-r.x,dz=m.z-r.z,d=Math.hypot(dx,dz); if(d<.75&&d>0){m.x=r.x+dx/d*.75;m.z=r.z+dz/d*.75;m.vx*=-.5;m.vz*=-.5;} }
-  }
-  const balls=[...S.boulders,...S.marbles];
-  for(let i=0;i<balls.length;i++) for(let j=i+1;j<balls.length;j++){
-    const a=balls[i],b=balls[j]; const dx=b.x-a.x,dz=b.z-a.z,d=Math.hypot(dx,dz),m=a.r+b.r;
-    if(d<m&&d>0){const nx=dx/d,nz=dz/d,o=(m-d)/2; a.x-=nx*o;a.z-=nz*o;b.x+=nx*o;b.z+=nz*o;
-      const p=(a.vx-b.vx)*nx+(a.vz-b.vz)*nz; a.vx-=p*nx;a.vz-=p*nz;b.vx+=p*nx;b.vz+=p*nz;}
-  }
-  // pangolin
-  const p=S.pang; if(!p.alive) return;
-  if(p.rolling){
-    stepBody(p,dt,.993);
-    for(const w of S.barriers) if(w.hp>0 && Math.abs(p.z-w.z)<.4){ p.z=p.vz<0? w.z+.4 : w.z-.4; p.vz*=-.3; }
-    for(const b of S.boulders){ const dx=p.x-b.x,dz=p.z-b.z,d=Math.hypot(dx,dz),m=p.r+b.r;
-      if(d<m&&d>0){p.x=b.x+dx/d*m;p.z=b.z+dz/d*m;p.vx*=-.3;p.vz*=-.3;} }
-    for(const r of S.robots) if(r.on && Math.hypot(r.x-p.x,r.z-p.z)<.9){ p.alive=false; say('Caught! Tap reset'); }
-    if(p.z<.6){ S.won=true; say('Pangolin made it home'); }
-  } else { p.vx=p.vz=0; }
-}
-
-// ---------- render ----------
-function line(a,b){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}
-function poly(pts,keep){ if(!keep) ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
+// ---------- orientation ----------
 let sm=null;
+function upVec(){ // world-up in device frame (x right, y up, z out of screen)
+  const b=ori.b*Math.PI/180,g=ori.g*Math.PI/180;
+  return [-Math.cos(b)*Math.sin(g), Math.sin(b), Math.cos(b)*Math.cos(g)];
+}
 function orient(){
   if(!base) return {yaw:viewYaw, pitch:viewPitch, roll:0};
   const a=ori.a*Math.PI/180,b=ori.b*Math.PI/180,g=ori.g*Math.PI/180;
   const ca=Math.cos(a),sa=Math.sin(a),cb=Math.cos(b),sb=Math.sin(b),cg=Math.cos(g),sg=Math.sin(g);
-  // world-up in device frame -> pitch and roll
-  const ux=-cb*sg, uy=sb, uz=cb*cg;
+  const [ux,uy,uz]=upVec();
   const pitch=Math.atan2(uz,Math.hypot(ux,uy))*180/Math.PI, roll=Math.atan2(ux,uy);
-  // where the back of the phone points in the world (device -z axis) -> heading, stable when upright
   const nx=ca*sg+sa*sb*cg, ny=sa*sg-ca*sb*cg;
   const yaw=Math.atan2(-nx,-ny)*180/Math.PI;
   if(!sm){ sm={yaw,pitch,roll}; return sm; }
@@ -189,98 +141,143 @@ function orient(){
   sm.yaw=((sm.yaw+dy*k+540)%360)-180; sm.pitch+=(pitch-sm.pitch)*k; sm.roll+=(roll-sm.roll)*k;
   return sm;
 }
+
+// ---------- physics ----------
+const G=32, REST=.45, FRIC=.996;
+function stepBody(b,dt){
+  if(b.pinned) return;
+  b.vx+=(grav.x*G+flick.x)*dt; b.vy+=(grav.y*G+flick.y)*dt; b.vz+=(grav.z*G+flick.z)*dt;
+  b.vx*=FRIC; b.vy*=FRIC; b.vz*=FRIC;
+  b.x+=b.vx*dt; b.y+=b.vy*dt; b.z+=b.vz*dt;
+  const lx=W/2-b.r, ly=H/2-b.r;
+  if(b.x<-lx){b.x=-lx;b.vx*=-REST} if(b.x>lx){b.x=lx;b.vx*=-REST}
+  if(b.y<-ly){b.y=-ly;b.vy*=-REST} if(b.y>ly){b.y=ly;b.vy*=-REST}
+  if(b.z<b.r){b.z=b.r;b.vz*=-REST} if(b.z>D-b.r){b.z=D-b.r;b.vz*=-REST}
+}
+function collide(a,b){
+  const dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz),m=a.r+b.r;
+  if(d>=m||d===0) return false;
+  const nx=dx/d,ny=dy/d,nz=dz/d;
+  const wa=a.pinned?0:1, wb=b.pinned?0:1, tot=wa+wb||1, o=(m-d);
+  a.x-=nx*o*wa/tot;a.y-=ny*o*wa/tot;a.z-=nz*o*wa/tot; b.x+=nx*o*wb/tot;b.y+=ny*o*wb/tot;b.z+=nz*o*wb/tot;
+  const p=(a.vx-b.vx)*nx+(a.vy-b.vy)*ny+(a.vz-b.vz)*nz; if(p<0) return true;
+  if(!a.pinned){a.vx-=p*nx*wb/tot*2*.7;a.vy-=p*ny*wb/tot*2*.7;a.vz-=p*nz*wb/tot*2*.7;}
+  if(!b.pinned){b.vx+=p*nx*wa/tot*2*.7;b.vy+=p*ny*wa/tot*2*.7;b.vz+=p*nz*wa/tot*2*.7;}
+  return true;
+}
+function wallHit(b){ for(const w of S.barriers){ if(w.hp<=0) continue;
+  if(b.z<w.z+.3+b.r && b.z>w.z-.3-b.r){ if(b.smash && Math.abs(b.vz)>3){ w.hp=0; b.vz*=.35; say('Barrier smashed'); }
+    else { b.z=b.vz<0? w.z+.3+b.r : w.z-.3-b.r; b.vz*=-.4; } } } }
+function update(dt){
+  if(S.won) return; S.t+=dt;
+  if(base){ const [ux,uy,uz]=upVec(); grav={x:-ux,y:uy,z:uz}; }
+  else { kb.x=(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0)||kb.x; kb.z=(keys.ArrowDown?1:0)-(keys.ArrowUp?1:0)||kb.z;
+         const n=Math.hypot(kb.x,1,kb.z); grav={x:kb.x/n,y:1/n,z:kb.z/n}; if(!drag&&!Object.values(keys).some(v=>v)) kb={x:0,z:0}; }
+  const p=S.pang;
+  for(const b of S.boulders){ b.smash=true; stepBody(b,dt); wallHit(b); }
+  for(const m of S.marbles){ stepBody(m,dt); wallHit(m); }
+  for(const r of S.robots){ stepBody(r,dt); wallHit(r); }
+  if(p.alive){ stepBody(p,dt); if(p.rolling) wallHit(p); }
+  const all=[...S.boulders,...S.marbles,...S.robots,p];
+  for(let i=0;i<all.length;i++) for(let j=i+1;j<all.length;j++){
+    const a=all[i],b=all[j]; if(!collide(a,b)) continue;
+    const bo=a.smash?a:(b.smash?b:null), ro=a.on!==undefined?a:(b.on!==undefined?b:null);
+    if(bo&&ro&&ro.on){ ro.on=false; say('Robot decommissioned'); }
+    if((a===p||b===p)&&ro&&ro.on&&p.rolling&&p.alive){ p.alive=false; p.pinned=true; say('Caught! Tap reset'); }
+  }
+  flick={x:flick.x*.6,y:flick.y*.6,z:flick.z*.6};
+  if(p.alive&&p.rolling&&p.z<.7){ S.won=true; say('Pangolin made it home'); }
+}
+
+// ---------- render ----------
+function line(a,b){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}
+function poly(pts,keep){ if(!keep) ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
 function hill(deg){ return 14*Math.abs(Math.sin(deg*.05+1))+6*Math.sin(deg*.13)+4*Math.sin(deg*.31); }
 const clouds=[]; for(let i=0;i<24;i++) clouds.push({yaw:i*15+(i*37%11), el:12+(i*53%20), s:.05+((i*17)%5)*.012});
 function drawOutside(){
   const o=orient(), ppd=cw/60, big=Math.hypot(cw,ch)*1.2;
   ctx.save(); ctx.translate(cx,cy); ctx.rotate(o.roll);
-  const hy=-o.pitch*ppd;                     // horizon y (looking up moves horizon down)
+  const hy=-o.pitch*ppd;
   const sky=ctx.createLinearGradient(0,hy-90*ppd,0,hy); sky.addColorStop(0,'#3d86c6'); sky.addColorStop(.7,'#8fc3e8'); sky.addColorStop(1,'#e2eef6');
   ctx.fillStyle=sky; ctx.fillRect(-big,-big,2*big,big+hy);
   const gnd=ctx.createLinearGradient(0,hy,0,hy+60*ppd); gnd.addColorStop(0,'#9dbb63'); gnd.addColorStop(1,'#4f7233');
   ctx.fillStyle=gnd; ctx.fillRect(-big,hy,2*big,big-hy);
   const wrap=d=>((d+180)%360+360)%360-180;
-  // sun
   const sxx=wrap(140-o.yaw)*ppd, syy=hy-45*ppd;
   ctx.fillStyle='rgba(255,243,176,.35)'; ctx.beginPath(); ctx.arc(sxx,syy,cw*.11,0,7); ctx.fill();
   ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(sxx,syy,cw*.05,0,7); ctx.fill();
-  // clouds
   ctx.fillStyle='rgba(255,255,255,.9)';
   for(const c of clouds){ const x=wrap(c.yaw-o.yaw)*ppd, y=hy-c.el*ppd, r=cw*c.s;
     if(Math.abs(x)>big) continue; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.arc(x+r*.9,y+r*.2,r*.8,0,7); ctx.arc(x-r*.9,y+r*.25,r*.7,0,7); ctx.fill(); }
-  // hills along the horizon
   ctx.fillStyle='#6f8f4a'; ctx.beginPath(); ctx.moveTo(-big,hy+2);
   for(let x=-big;x<=big;x+=cw/40){ ctx.lineTo(x, hy-hill(o.yaw+x/ppd)*ppd*.35); }
   ctx.lineTo(big,hy+2); ctx.fill();
   ctx.fillStyle='#4d6b34'; ctx.beginPath(); ctx.moveTo(-big,hy+2);
   for(let x=-big;x<=big;x+=cw/40){ ctx.lineTo(x, hy-hill(o.yaw*1.6+x/ppd+90)*ppd*.18); }
   ctx.lineTo(big,hy+2); ctx.fill();
-  // meadow: tufts and flowers receding toward the horizon
-  for(let row=1;row<=9;row++){ const y=hy+ (row*row)*1.1*ppd, sc=row/9, sp=cw*.09*sc+cw*.03;
+  for(let row=1;row<=9;row++){ const y=hy+(row*row)*1.1*ppd, sc=row/9, sp=cw*.09*sc+cw*.03;
     const off=wrap(o.yaw)*ppd*(.3+sc*.9);
     for(let x=-big;x<=big;x+=sp){ const xx=x-(off%sp), k=Math.floor((x+row*977)/sp);
       ctx.fillStyle=(k%5===0)?'#f2d13b':(k%7===0)?'#e9eef4':'#3f6b2b';
       if(k%5===0||k%7===0){ ctx.beginPath(); ctx.arc(xx,y,sc*cw*.006+1,0,7); ctx.fill(); }
-      else { ctx.fillRect(xx,y-sc*cw*.02,Math.max(1,sc*cw*.004),sc*cw*.02); } }
-  }
+      else { ctx.fillRect(xx,y-sc*cw*.02,Math.max(1,sc*cw*.004),sc*cw*.02); } } }
   ctx.restore();
 }
 function drawBox(){
   drawOutside();
-  const h=H/2,w=W/2;
-  // floor
-  ctx.fillStyle='#c9a46e'; poly([P(-w,h,0),P(w,h,0),P(w,h,D),P(-w,h,D)]); ctx.fill();
-  // far wall
-  ctx.fillStyle='#6b4b33'; poly([P(-w,-h,D),P(w,-h,D),P(w,h,D),P(-w,h,D)]); ctx.fill();
-  // side walls and ceiling: solid wall with a big window hole (evenodd)
-  const wa=W/2-.45, zl=1.2, zr=D-.9, wy0=-h+.6, wy1=h-.9;
-  ctx.fillStyle='#4a3527';
-  poly([P(-w,-h,0),P(-w,-h,D),P(-w,h,D),P(-w,h,0)]); poly([P(-w,wy0,zl),P(-w,wy0,zr),P(-w,wy1,zr),P(-w,wy1,zl)],true); ctx.fill('evenodd');
-  poly([P(w,-h,0),P(w,-h,D),P(w,h,D),P(w,h,0)]);     poly([P(w,wy0,zl),P(w,wy0,zr),P(w,wy1,zr),P(w,wy1,zl)],true);     ctx.fill('evenodd');
-  ctx.fillStyle='#3b2b21';
-  poly([P(-w,-h,0),P(w,-h,0),P(w,-h,D),P(-w,-h,D)]); poly([P(-wa,-h,zl),P(wa,-h,zl),P(wa,-h,zr),P(-wa,-h,zr)],true); ctx.fill('evenodd');
-  // window frames
+  const h=H/2,w=W/2, zl=1.2, zr=D-.9, ix=w-.5, iy=h-.6, fi=.5;
+  const walls=[
+    {c:'#c9a46e', outer:[P(-w,h,0),P(w,h,0),P(w,h,D),P(-w,h,D)],   hole:[P(-ix,h,zl),P(ix,h,zl),P(ix,h,zr),P(-ix,h,zr)]},        // floor
+    {c:'#3b2b21', outer:[P(-w,-h,0),P(w,-h,0),P(w,-h,D),P(-w,-h,D)], hole:[P(-ix,-h,zl),P(ix,-h,zl),P(ix,-h,zr),P(-ix,-h,zr)]},    // ceiling
+    {c:'#4a3527', outer:[P(-w,-h,0),P(-w,-h,D),P(-w,h,D),P(-w,h,0)], hole:[P(-w,-iy,zl),P(-w,-iy,zr),P(-w,iy,zr),P(-w,iy,zl)]},    // left
+    {c:'#4a3527', outer:[P(w,-h,0),P(w,-h,D),P(w,h,D),P(w,h,0)],     hole:[P(w,-iy,zl),P(w,-iy,zr),P(w,iy,zr),P(w,iy,zl)]},        // right
+    {c:'#6b4b33', outer:[P(-w,-h,D),P(w,-h,D),P(w,h,D),P(-w,h,D)],   hole:[P(-w+fi,-h+fi,D),P(w-fi,-h+fi,D),P(w-fi,h-fi,D),P(-w+fi,h-fi,D)]} // far
+  ];
+  for(const wl of walls){ ctx.fillStyle=wl.c; poly(wl.outer); poly(wl.hole,true); ctx.fill('evenodd'); }
   ctx.strokeStyle='#2a1d14'; ctx.lineWidth=2*devicePixelRatio;
-  poly([P(-w,wy0,zl),P(-w,wy0,zr),P(-w,wy1,zr),P(-w,wy1,zl)]); ctx.stroke();
-  poly([P(w,wy0,zl),P(w,wy0,zr),P(w,wy1,zr),P(w,wy1,zl)]); ctx.stroke();
-  poly([P(-wa,-h,zl),P(wa,-h,zl),P(wa,-h,zr),P(-wa,-h,zr)]); ctx.stroke();
-  // floor grid + box edges
-  ctx.strokeStyle='rgba(42,29,20,.45)'; ctx.lineWidth=1.5*devicePixelRatio;
-  for(let z=0;z<=D;z+=2){ line(P(-w,h,z),P(w,h,z)); }
-  for(let x=-w;x<=w;x+=1){ line(P(x,h,0),P(x,h,D)); }
-  ctx.strokeStyle='#2a1d14'; ctx.lineWidth=3*devicePixelRatio;
+  for(const wl of walls){ poly(wl.hole); ctx.stroke(); }
+  ctx.lineWidth=3*devicePixelRatio;
   for(const [x,y] of [[-w,-h],[w,-h],[w,h],[-w,h]]) line(P(x,y,0),P(x,y,D));
+  // glass hint at the open end: faint depth marks along the floor and ceiling edges
+  ctx.strokeStyle='rgba(42,29,20,.35)'; ctx.lineWidth=1.5*devicePixelRatio;
+  for(let z=0;z<=zl;z+=.6){ line(P(-w,h,z),P(w,h,z)); line(P(-w,-h,z),P(w,-h,z)); }
 }
-function shadow(x,z,r){ const [sx,sy,s]=P(x,H/2,z); ctx.fillStyle='rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(sx,sy,r*s*K,r*s*K*.35,0,0,Math.PI*2); ctx.fill(); }
-function drawBoulder(b){ shadow(b.x,b.z,b.r); const [sx,sy,s]=P(b.x,H/2-b.r,b.z), R=b.r*s*K;
-  ctx.fillStyle='#7d7469'; ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fill();
-  ctx.fillStyle='#9a9186'; ctx.beginPath(); ctx.arc(sx-R*.3,sy-R*.3,R*.45,0,7); ctx.fill(); }
-function drawMarble(m){ shadow(m.x,m.z,m.r); const [sx,sy,s]=P(m.x,H/2-m.r,m.z), R=m.r*s*K;
-  ctx.fillStyle='#3f7fa6'; ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fill();
-  ctx.fillStyle='#bfe3f5'; ctx.beginPath(); ctx.arc(sx-R*.35,sy-R*.35,R*.35,0,7); ctx.fill(); }
+function shadow(b){ // drop a shadow onto whichever wall lies along gravity
+  let t=1e9; const g=grav;
+  if(g.x>0) t=Math.min(t,(W/2-b.x)/g.x); if(g.x<0) t=Math.min(t,(-W/2-b.x)/g.x);
+  if(g.y>0) t=Math.min(t,(H/2-b.y)/g.y); if(g.y<0) t=Math.min(t,(-H/2-b.y)/g.y);
+  if(g.z>0) t=Math.min(t,(D-b.z)/g.z);   if(g.z<0) t=Math.min(t,(-b.z)/g.z);
+  if(t>1e8) return; const [sx,sy,s]=P(b.x+g.x*t,b.y+g.y*t,b.z+g.z*t);
+  ctx.fillStyle='rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(sx,sy,b.r*s*K,b.r*s*K*.5,0,0,7); ctx.fill();
+}
+function sph(b,c1,c2){ shadow(b); const [sx,sy,s]=P(b.x,b.y,b.z), R=b.r*s*K;
+  ctx.fillStyle=c1; ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fill();
+  ctx.fillStyle=c2; ctx.beginPath(); ctx.arc(sx-R*.32,sy-R*.32,R*.4,0,7); ctx.fill(); }
+function drawBoulder(b){ sph(b,'#7d7469','#9a9186'); }
+function drawMarble(m){ sph(m,'#3f7fa6','#bfe3f5'); }
 function drawBarrier(w){ if(w.hp<=0) return; const h=H/2;
-  for(let i=0;i<3;i++){ const y=h-.3-i*.5; const a=P(-W/2,y,w.z),b=P(W/2,y,w.z);
+  for(let i=0;i<5;i++){ const y=h-.4-i*(2*h-.8)/4.4; const a=P(-W/2,y,w.z),b=P(W/2,y,w.z);
     ctx.strokeStyle='#5a3b26'; ctx.lineWidth=.42*a[2]*K; line(a,b); } }
-function drawRobot(r){ shadow(r.x,r.z,.5); const [sx,sy,s]=P(r.x,H/2-.55,r.z), R=.5*s*K;
+function drawRobot(r){ shadow(r); const [sx,sy,s]=P(r.x,r.y,r.z), R=r.r*s*K;
   ctx.fillStyle=r.on?'#8d949c':'#5d6166'; ctx.fillRect(sx-R,sy-R,2*R,2*R);
   ctx.fillStyle=r.on?'#d8262c':'#6f8f4a'; ctx.beginPath(); ctx.arc(sx,sy-R*.2,R*.28,0,7); ctx.fill();
   if(r.on){ ctx.strokeStyle='#8d949c'; ctx.lineWidth=R*.25; line([sx-R,sy+R*.2],[sx-R*1.6,sy+R*.6]); line([sx+R,sy+R*.2],[sx+R*1.6,sy+R*.6]); } }
-function drawPang(p){ shadow(p.x,p.z,p.r*1.1); const [sx,sy,s]=P(p.x,H/2-p.r,p.z), R=p.r*s*K;
-  ctx.save(); ctx.translate(sx,sy);
-  if(!p.alive){ ctx.globalAlpha=.5 }
+function drawPang(p){ shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
+  ctx.save(); ctx.translate(sx,sy); if(!p.alive) ctx.globalAlpha=.5;
   if(p.rolling){ ctx.rotate((p.z+p.x)*3); ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fill();
     ctx.strokeStyle='#6d4318'; ctx.lineWidth=Math.max(1,R*.12);
     for(let i=0;i<4;i++){ ctx.beginPath(); ctx.arc(0,0,R*(.35+i*.2),i*.7,i*.7+2.4); ctx.stroke(); } }
-  else { ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.ellipse(0,R*.1,R*1.3,R*.8,0,0,7); ctx.fill();
+  else { ctx.rotate(Math.atan2(grav.x,grav.y)*-1); // stand on whatever is down
+    ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.ellipse(0,R*.1,R*1.3,R*.8,0,0,7); ctx.fill();
     ctx.strokeStyle='#6d4318'; ctx.lineWidth=Math.max(1,R*.12);
     for(let i=-2;i<=2;i++){ ctx.beginPath(); ctx.arc(i*R*.45,R*.1,R*.5,Math.PI*1.15,Math.PI*1.85); ctx.stroke(); }
-    ctx.fillStyle='#c48a45'; ctx.beginPath(); ctx.ellipse(-R*1.35,R*.25,R*.45,R*.3,0,0,7); ctx.fill(); // head
+    ctx.fillStyle='#c48a45'; ctx.beginPath(); ctx.ellipse(-R*1.35,R*.25,R*.45,R*.3,0,0,7); ctx.fill();
     ctx.fillStyle='#2a1d14'; ctx.beginPath(); ctx.arc(-R*1.5,R*.15,R*.08,0,7); ctx.fill();
     ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.moveTo(R*1.1,0); ctx.lineTo(R*2.1,R*.3); ctx.lineTo(R*1.1,R*.5); ctx.fill(); }
   ctx.restore(); }
 function drawTilt(){ const r=22*devicePixelRatio, x=cw-r-14*devicePixelRatio, y=r+14*devicePixelRatio;
   ctx.strokeStyle='rgba(230,197,143,.6)'; ctx.lineWidth=2*devicePixelRatio; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.stroke();
-  ctx.fillStyle='#e6c58f'; ctx.beginPath(); ctx.arc(x+tilt.x*r*.8,y+tilt.z*r*.8,5*devicePixelRatio,0,7); ctx.fill(); }
+  ctx.fillStyle='#e6c58f'; ctx.beginPath(); ctx.arc(x+grav.x*r*.8,y+grav.y*r*.8,(4+grav.z*3)*devicePixelRatio,0,7); ctx.fill(); }
 function render(){
   drawBox();
   const items=[];
