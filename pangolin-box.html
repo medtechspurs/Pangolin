@@ -37,7 +37,7 @@
 </div>
 <div id="big">
   <h1>Pangolin</h1>
-  <p style="font-size:13px;opacity:.7">v2.6</p>
+  <p style="font-size:13px;opacity:.7">v2.7</p>
   <p>The robots have taken over. Humanity's last hope is the pangolins, who have been hiding one thing: they are very, very smart.</p>
   <p>Your phone is the open end of a box. Tip and turn it and the box goes with it. Lay boulders to decommission the robots, curl up, roll into the cannon, and aim the far window at a saucer. Hold Launch to charge. One shot per level. Rescue the humans.</p>
   <button id="start">Start (allow tilt)</button>
@@ -221,8 +221,7 @@ function update(dt){
     if(S.pt>1.3) launchNow();
   } else if(S.phase==='fly'){
     const sh=S.shot; sh.t+=dt;
-    // free flight in the box frame: real gravity, no walls once past the far window
-    p.vx+=grav.x*G*dt; p.vy+=grav.y*G*dt; p.vz+=grav.z*G*dt;
+    // straight shot along the aim line through the reticle
     p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
     const o=orient();
     for(const u of S.ufos){ if(!u.alive) continue; const b=ufoBox(u,o);
@@ -388,7 +387,7 @@ function drawPath(){ if(!S.corked||S.phase!=='play') return; const c=S.cannon, v
   for(let i=0;i<150;i++){ vx+=grav.x*G*dt; vy+=grav.y*G*dt; vz+=grav.z*G*dt; x+=vx*dt; y+=vy*dt; z+=vz*dt;
     if(z<D) continue; if(i%3) continue; const [sx,sy,sc]=P(x,y,z); const rr=Math.max(1.5,sc*K*.5); if(z<D+2){ const fi=.5; if(Math.abs(x)>W/2-fi||Math.abs(y)>H/2-fi) break; }
     ctx.beginPath(); ctx.arc(sx,sy,rr,0,7); ctx.fill(); } }
-function drawReticle(){ if(!S.corked||(S.phase!=='play'&&S.phase!=='fuse')) return; drawPath(); const r=cw*.06;
+function drawReticle(){ if(!S.corked||(S.phase!=='play'&&S.phase!=='fuse')) return; const r=cw*.06;
   ctx.strokeStyle='rgba(255,60,60,.9)'; ctx.lineWidth=2*devicePixelRatio;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
   for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) line([cx+dx*r*.5,cy+dy*r*.5],[cx+dx*r*1.5,cy+dy*r*1.5]);
