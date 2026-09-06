@@ -37,7 +37,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v2.2</p>
+  <p style="font-size:13px;opacity:.7">v2.3</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll into the cannon. Turn the phone to aim the far window at a saucer, hold Launch to charge, and let go. One shot per level.</p>
   <button id="start">Start (allow tilt)</button>
@@ -154,7 +154,7 @@ function orient(){
 }
 const wrap=d=>((d+180)%360+360)%360-180;
 function ufoBox(u,o){ // saucer position in the box's frame for the current orientation
-  const dy=wrap(u.yaw-o.yaw)*Math.PI/180, de=(u.el+Math.sin(u.bob)*.6-o.pitch)*Math.PI/180;
+  const dy=wrap(u.yaw-o.yaw)*Math.PI/180, de=(u.el+Math.sin(u.bob)*.6+o.pitch)*Math.PI/180;   // looking up is negative pitch (matches the sky)
   return {x:u.dist*Math.sin(dy)*Math.cos(de), y:-u.dist*Math.sin(de), z:u.dist*Math.cos(dy)*Math.cos(de), r:14+u.dist*.045}; }
 
 // ---------- physics ----------
