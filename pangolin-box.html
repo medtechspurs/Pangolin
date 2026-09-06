@@ -31,15 +31,15 @@
   <div id="bar">
     <button id="drop">Lay boulder (3)</button>
     <button id="mode">Curl &amp; roll</button>
-    <button id="launch" style="display:none">Launch (hold)</button>
+    <button id="launch" style="display:none">Launch</button>
     <button id="reset" style="flex:.6">Reset</button>
   </div>
 </div>
 <div id="big">
   <h1>Pangolin</h1>
-  <p style="font-size:13px;opacity:.7">v2.8</p>
+  <p style="font-size:13px;opacity:.7">v3.0</p>
   <p>The robots have taken over. Humanity's last hope is the pangolins, who have been hiding one thing: they are very, very smart.</p>
-  <p>Your phone is the open end of a box. Tip and turn it and the box goes with it. Lay boulders to decommission the robots, curl up, roll into the cannon, and aim the far window at a saucer. Hold Launch to charge. One shot per level. Rescue the humans.</p>
+  <p>Your phone is the open end of a box. Tip and turn it and the box goes with it. Lay boulders to decommission the robots, curl up, roll into the cannon, and aim the far window at a saucer. Anything that rolls into the cannon first gets loaded too; after the pangolin comes back, fire the rest one at a time. Rescue the humans.</p>
   <button id="start">Start (allow tilt)</button>
   <p style="font-size:13px;opacity:.8">On a desktop, use arrow keys or drag.</p>
 </div>
@@ -65,7 +65,7 @@ function newState(n){
     boulders:[], stock:3,
     marbles:[[-1.5,10.5],[1.8,9.6],[.4,6.5],[-2,4],[2.2,2.2]].map(([x,z])=>ball(x,0,z,.22,{rest:.75})),
     barriers, robots, ufos,
-    phase:'play', pt:0, corked:false, charge:0, charging:false, shot:null, shotScore:0, shutter:0, t:0
+    phase:'play', pt:0, corked:false, charge:1, charging:false, shot:null, shotScore:0, shutter:0, t:0, magazine:[], projs:[], particles:[], pangFired:false, kind:null
   };
 }
 S=newState(level);
@@ -87,8 +87,8 @@ function onOri(e){ if(e.beta==null) return; base=true; ori={a:e.alpha||0,b:e.bet
 function onMotion(e){ const a=e.acceleration; if(!a||a.x==null) return;
   const k=MOTION_GAIN*G/9.81; acc={x:a.x*k, y:-a.y*k, z:-a.z*k}; accAt=performance.now(); }
 const keys={};
-addEventListener('keydown',e=>{keys[e.key]=1; if(e.key===' ')dropBoulder(); if(e.key==='r')toggleMode(); if(e.key==='l')startCharge();});
-addEventListener('keyup',e=>{keys[e.key]=0; if(e.key==='l')fire();});
+addEventListener('keydown',e=>{keys[e.key]=1; if(e.key===' ')dropBoulder(); if(e.key==='r')toggleMode(); if(e.key==='l')fire();});
+addEventListener('keyup',e=>{keys[e.key]=0;});
 let drag=null, viewYaw=0, viewPitch=0, kb={x:0,z:0};
 cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,vy:viewYaw,vp:viewPitch}});
 addEventListener('pointerup',()=>{drag=null});
@@ -123,19 +123,39 @@ function toggleMode(){
   p.rolling=!p.rolling; p.pinned=!p.rolling; modeBtn.classList.toggle('on',p.rolling);
   modeBtn.textContent=p.rolling?'Uncurl & walk':'Curl & roll';
 }
-function startCharge(){ if(S.phase!=='play'||!S.corked) return; S.charging=true; S.charge=0; }
-function fire(){ if(!S.charging) return; S.charging=false;
-  S.phase='fuse'; S.pt=0; S.shotScore=0; launchBtn.style.display='none'; say(''); }
-function launchNow(){ const c=S.cannon, p=S.pang;
-  S.shot={t:0}; S.corked=false; p.pinned=false; p.rolling=true; p.x=c.x; p.y=c.y; p.z=c.z+1.2;
-  const v=launchVel(); p.vx=v.x; p.vy=v.y; p.vz=v.z; S.phase='fly'; }
+function canLaunch(){ return S.phase==='play' && ((S.corked&&!S.pangFired) || (S.pangFired&&S.magazine.length>0)); }
+function fire(){ if(!canLaunch()) return; say('');
+  if(!S.pangFired) launchPang(); else launchItem();
+  blast(); boom(); updateLaunchBtn(); }
+const SP=420;
 function launchVel(){ // zeroed on the reticle line far out, so the shot converges with the aim axis at saucer range
-  const c=S.cannon, ZERO=900, dx=0-c.x, dy=0-c.y, dz=ZERO-(c.z+1.2), n=Math.hypot(dx,dy,dz), sp=120+S.charge*380;
-  return {x:dx/n*sp, y:dy/n*sp, z:dz/n*sp}; }
-launchBtn.onpointerdown=e=>{e.preventDefault(); startCharge();};
-addEventListener('pointerup',fire); addEventListener('pointercancel',fire);
+  const c=S.cannon, ZERO=900, dx=0-c.x, dy=0-c.y, dz=ZERO-(c.z+1.2), n=Math.hypot(dx,dy,dz);
+  return {x:dx/n*SP, y:dy/n*SP, z:dz/n*SP}; }
+function launchPang(){ const c=S.cannon, p=S.pang, v=launchVel();
+  S.shot={t:0}; S.corked=false; S.pangFired=true; p.pinned=false; p.rolling=true; p.x=c.x; p.y=c.y; p.z=c.z+1.2;
+  p.vx=v.x; p.vy=v.y; p.vz=v.z; S.phase='fly'; S.pt=0; S.shotScore=0; }
+function launchItem(){ const c=S.cannon, it=S.magazine.shift(), v=launchVel();
+  S.projs.push(Object.assign(it,{x:c.x,y:c.y,z:c.z+1.2,vx:v.x,vy:v.y,vz:v.z,t:0,pinned:false})); }
+function updateLaunchBtn(){ const show=canLaunch(); launchBtn.style.display=show?'block':'none';
+  launchBtn.textContent=S.pangFired?`Launch (${S.magazine.length} left)`:(S.magazine.length?`Launch (+${S.magazine.length} loaded)`:'Launch'); }
+// muzzle blast: particles in box coordinates
+function blast(){ const c=S.cannon; for(let i=0;i<70;i++){ const sp=20+Math.random()*90, a=Math.random()*6.28, r=Math.random()*.9;
+  S.particles.push({x:c.x,y:c.y,z:c.z+1.2,vx:Math.cos(a)*r*sp*.35,vy:Math.sin(a)*r*sp*.35,vz:sp,life:.5+Math.random()*.5,age:0,spark:Math.random()<.35}); }
+  for(let i=0;i<24;i++){ const a=i/24*6.28; S.particles.push({x:c.x,y:c.y,z:c.z+1.2,vx:Math.cos(a)*9,vy:Math.sin(a)*9,vz:5,life:1.1,age:0,ring:true}); } }
+// synthesized cannon boom
+let AC=null;
+function boom(){ try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)(); if(AC.state==='suspended') AC.resume(); const t=AC.currentTime;
+  const nb=AC.createBuffer(1,AC.sampleRate*.6,AC.sampleRate), d=nb.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,2.2);
+  const n=AC.createBufferSource(); n.buffer=nb; const f=AC.createBiquadFilter(); f.type='lowpass'; f.frequency.setValueAtTime(2600,t); f.frequency.exponentialRampToValueAtTime(180,t+.5);
+  const g=AC.createGain(); g.gain.setValueAtTime(.9,t); g.gain.exponentialRampToValueAtTime(.001,t+.6); n.connect(f); f.connect(g); g.connect(AC.destination); n.start(t);
+  const o=AC.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(140,t); o.frequency.exponentialRampToValueAtTime(38,t+.35);
+  const g2=AC.createGain(); g2.gain.setValueAtTime(.8,t); g2.gain.exponentialRampToValueAtTime(.001,t+.45); o.connect(g2); g2.connect(AC.destination); o.start(t); o.stop(t+.5);
+  const z=AC.createOscillator(); z.type='square'; z.frequency.setValueAtTime(900,t); z.frequency.exponentialRampToValueAtTime(200,t+.12);
+  const g3=AC.createGain(); g3.gain.setValueAtTime(.15,t); g3.gain.exponentialRampToValueAtTime(.001,t+.15); z.connect(g3); g3.connect(AC.destination); z.start(t); z.stop(t+.16);
+}catch(e){} }
+launchBtn.onclick=fire;
 dropBtn.onclick=dropBoulder; modeBtn.onclick=toggleMode;
-function uiReset(){ dropBtn.textContent=`Lay boulder (${S.stock})`; modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); launchBtn.style.display='none'; say(''); }
+function uiReset(){ dropBtn.textContent=`Lay boulder (${S.stock})`; modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); updateLaunchBtn(); say(''); }
 document.getElementById('reset').onclick=()=>{S=newState(level); resize(); sm=null; uiReset();};
 function say(t){msg.textContent=t}
 
@@ -209,16 +229,22 @@ function update(dt){
     if(bo&&ro&&ro.on){ ro.on=false; say('Robot decommissioned'); }
     if((a===p||b===p)&&ro&&ro.on&&p.rolling&&p.alive){ p.alive=false; p.pinned=true; say('Caught! Tap reset'); }
   }
+  // muzzle blast particles
+  for(const q of S.particles){ q.age+=dt; q.x+=q.vx*dt; q.y+=q.vy*dt; q.z+=q.vz*dt; q.vx*=.9; q.vy*=.9; q.vz*=.9; }
+  S.particles=S.particles.filter(q=>q.age<q.life);
+  // launched objects: straight shots, hit test against saucers
+  { const o=orient(); for(const q of S.projs){ q.t+=dt; q.x+=q.vx*dt; q.y+=q.vy*dt; q.z+=q.vz*dt;
+      for(const u of S.ufos){ if(!u.alive) continue; const b=ufoBox(u,o); if(Math.hypot(q.x-b.x,q.y-b.y,q.z-b.z)<b.r+q.r+6){ u.alive=false; u.vfall=8; kills++; const sc=Math.round(u.dist/10)*10; total+=sc; say(`Hit! +${sc}`); q.dead=true; break; } } }
+    S.projs=S.projs.filter(q=>!q.dead&&q.t<5); }
   if(S.phase==='play'){
-    // roll into the cannon mouth (faces the far wall) to cork it
-    const c=S.cannon;
-    if(p.alive&&p.rolling&&!S.corked&&p.vz<0&&Math.abs(p.x-c.x)<.75&&Math.abs(p.y-c.y)<.75&&p.z>c.z+.5&&p.z<c.z+1.9){
-      S.corked=true; p.pinned=true; p.x=c.x; p.y=c.y; p.z=c.z+.9; p.vx=p.vy=p.vz=0;
-      launchBtn.style.display='block'; say('Corked. Turn to aim, hold Launch to charge');
+    const c=S.cannon, mouth=b=>b.vz<0&&Math.abs(b.x-c.x)<.75&&Math.abs(b.y-c.y)<.75&&b.z>c.z+.5&&b.z<c.z+1.9;
+    if(!S.corked&&!S.pangFired){ // anything rolling into the muzzle gets loaded, until the pangolin seals it
+      for(const [list,kind] of [[S.marbles,'marble'],[S.boulders,'boulder'],[S.robots,'robot']]){
+        for(let i=list.length-1;i>=0;i--){ const b=list[i]; if(mouth(b)){ list.splice(i,1); S.magazine.push(Object.assign(b,{kind})); say(`${kind} loaded`); } } }
+      if(p.alive&&p.rolling&&mouth(p)){ S.corked=true; p.pinned=true; p.x=c.x; p.y=c.y; p.z=c.z+.9; p.vx=p.vy=p.vz=0; say('Corked. Turn to aim, then Launch'); }
+      updateLaunchBtn();
     }
-    if(S.charging) S.charge=Math.min(1,S.charge+dt*.8);
-  } else if(S.phase==='fuse'){
-    if(S.pt>1.3) launchNow();
+    if(S.pangFired&&S.magazine.length===0&&S.projs.length===0&&S.pt>1.2){ S.phase='score'; S.pt=0; showScore(); }
   } else if(S.phase==='fly'){
     const sh=S.shot; sh.t+=dt;
     // straight shot along the aim line through the reticle
@@ -234,9 +260,9 @@ function update(dt){
   } else if(S.phase==='reel'){
     const tx=0, ty=H/2-p.r, tz=D-.7, k=Math.min(1,dt*2.5);
     p.x+=(tx-p.x)*k; p.y+=(ty-p.y)*k; p.z+=(tz-p.z)*k;
-    if(Math.hypot(p.x-tx,p.y-ty,p.z-tz)<.3||S.pt>3){ S.phase='retract'; S.pt=0; depositPang(); }
+    if(Math.hypot(p.x-tx,p.y-ty,p.z-tz)<.3||S.pt>3){ S.phase='retract'; S.pt=0; depositPang(); S.corked=false; }
   } else if(S.phase==='retract'){
-    if(S.pt>.7){ S.phase='score'; S.pt=0; showScore(); }
+    if(S.pt>.7){ S.phase='play'; S.pt=0; updateLaunchBtn(); if(S.magazine.length) say('Now fire what you loaded'); }
   } else if(S.phase==='score'){
     if(S.pt>3){ S.phase='shut'; S.pt=0; document.getElementById('big').style.display='none'; }
   } else if(S.phase==='shut'){
@@ -297,6 +323,8 @@ function drawOutside(){
   // saucers and the pangolin in flight live in the box frame, so they project like everything else
   const bodies=[...S.ufos].map(u=>({u,b:ufoBox(u,o)})).filter(q=>q.b.z>D).sort((a,b)=>b.b.z-a.b.z);
   for(const {u,b} of bodies){ const [sx,sy,sc]=P(b.x,b.y,b.z); drawUfo(sx,sy,b.r*sc*K,u); }
+  for(const q of [...S.projs].sort((a,b)=>b.z-a.z)) if(q.z>D) drawProj(q);
+  drawParticles(false);
   const p=S.pang;
   if((S.phase==='fly'||S.phase==='reel')&&p.z>D){ const c=S.cannon, m=P(c.x,c.y,c.z+.9), q=P(p.x,p.y,p.z);
     ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,q);
@@ -334,6 +362,11 @@ function sph(b,c1,c2){ shadow(b); const [sx,sy,s]=P(b.x,b.y,b.z), R=b.r*s*K;
   const g=ctx.createRadialGradient(sx-R*.35,sy-R*.35,R*.1,sx,sy,R); g.addColorStop(0,c2); g.addColorStop(.55,c1); g.addColorStop(1,'rgba(0,0,0,.85)');
   ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fill(); }
 function drawBoulder(b){ sph(b,'#7d7469','#9a9186'); }
+function drawProj(q){ if(q.kind==='marble') drawMarble(q); else if(q.kind==='boulder') drawBoulder(q); else drawRobot(q); }
+function drawParticles(inside){ for(const q of S.particles){ if(inside?q.z>D:q.z<=D) continue; const [sx,sy,sc]=P(q.x,q.y,q.z), k=1-q.age/q.life;
+  if(q.ring){ ctx.strokeStyle=`rgba(200,200,210,${k*.5})`; ctx.lineWidth=Math.max(1,sc*K*.25*(1-k)+1); ctx.beginPath(); ctx.arc(sx,sy,Math.max(1,sc*K*.12),0,7); ctx.stroke(); }
+  else if(q.spark){ ctx.fillStyle=`rgba(255,${180+Math.floor(k*75)},60,${k})`; ctx.beginPath(); ctx.arc(sx,sy,Math.max(1,sc*K*.06),0,7); ctx.fill(); }
+  else { ctx.fillStyle=`rgba(${120+Math.floor(k*100)},${110+Math.floor(k*80)},110,${k*.55})`; ctx.beginPath(); ctx.arc(sx,sy,Math.max(1,sc*K*(.12+(1-k)*.3)),0,7); ctx.fill(); } } }
 function drawMarble(m){ sph(m,'#3f7fa6','#bfe3f5'); }
 function drawBarrier(w){ if(w.hp<=0) return; const h=H/2;
   for(let i=0;i<5;i++){ const y=h-.4-i*(2*h-.8)/4.4; const a=P(-W/2,y,w.z),b=P(W/2,y,w.z);
@@ -346,23 +379,17 @@ function drawCannon(){ const c=S.cannon, z0=c.z-.7, z1=c.z+.9, r=.62;
   const a=P(c.x,c.y,z0), b=P(c.x,c.y,z1), ra=r*a[2]*K, rb=r*b[2]*K;
   // muzzle opening (far end), then the pangolin sitting in it, then the barrel over both, then the near cap
   ctx.fillStyle='#1e2125'; ctx.beginPath(); ctx.arc(b[0],b[1],rb,0,7); ctx.fill();
-  if(S.corked||S.phase==='fuse'){ const m=P(c.x,c.y,z1+.25); ctx.save(); ctx.translate(m[0],m[1]); drawPangBall(.45*m[2]*K,1); ctx.restore(); }
+  if(S.corked){ const m=P(c.x,c.y,z1+.25); ctx.save(); ctx.translate(m[0],m[1]); drawPangBall(.45*m[2]*K,1); ctx.restore(); }
   ctx.fillStyle='#4b4f55'; ctx.beginPath();
   ctx.moveTo(a[0]-ra,a[1]); ctx.lineTo(b[0]-rb,b[1]); ctx.arc(b[0],b[1],rb,Math.PI,0); ctx.lineTo(a[0]+ra,a[1]); ctx.arc(a[0],a[1],ra,0,Math.PI); ctx.closePath(); ctx.fill();
   ctx.strokeStyle='#7c8189'; ctx.lineWidth=rb*.1; ctx.beginPath(); ctx.arc(b[0],b[1],rb,Math.PI,0); ctx.stroke();   // muzzle rim highlight
   ctx.fillStyle='#5d626a'; ctx.beginPath(); ctx.arc(a[0],a[1],ra,0,7); ctx.fill();
   ctx.fillStyle='#8a8f97'; ctx.beginPath(); ctx.arc(a[0]-ra*.3,a[1]-ra*.3,ra*.25,0,7); ctx.fill();
-  // fuse: curls up from the top of the breech, burns down during the fuse phase
-  const burn=S.phase==='fuse'?Math.min(1,S.pt/1.3):0, L=1-burn, fx=a[0], fy=a[1]-ra;
-  if(S.corked||S.phase==='fuse'){ ctx.strokeStyle='#c9b48a'; ctx.lineWidth=Math.max(2,ra*.08); ctx.beginPath(); ctx.moveTo(fx,fy);
-    const n=Math.max(1,Math.round(24*L)); let tipx=fx,tipy=fy;
-    for(let i=1;i<=n;i++){ const t=i/24; tipx=fx+ra*.9*Math.sin(t*4)*t; tipy=fy-ra*1.3*t; ctx.lineTo(tipx,tipy); } ctx.stroke();
-    if(burn>0){ ctx.fillStyle='#ff9a1f'; ctx.beginPath(); ctx.arc(tipx,tipy,ra*.16+Math.random()*ra*.08,0,7); ctx.fill();
-      ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(tipx,tipy,ra*.07,0,7); ctx.fill(); } } }
+}
 function drawPangBall(R,alpha){ ctx.globalAlpha=alpha; const g=ctx.createRadialGradient(-R*.35,-R*.35,R*.1,0,0,R); g.addColorStop(0,'#d19a55'); g.addColorStop(.6,'#a8702f'); g.addColorStop(1,'#5e3a15');
   ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fill();
   ctx.strokeStyle='#6d4318'; ctx.lineWidth=Math.max(1,R*.12); for(let i=0;i<4;i++){ ctx.beginPath(); ctx.arc(0,0,R*(.35+i*.2),i*.7,i*.7+2.4); ctx.stroke(); } ctx.globalAlpha=1; }
-function drawPang(p){ if(S.corked||S.phase==='fuse'||S.phase==='fly'||S.phase==='reel') return; shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
+function drawPang(p){ if(S.corked||S.phase==='fly'||S.phase==='reel') return; shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
   ctx.save(); ctx.translate(sx,sy); if(!p.alive) ctx.globalAlpha=.5;
   if(p.rolling){ ctx.rotate((p.z+p.x)*3); drawPangBall(R,p.alive?1:.5); }
   else { ctx.rotate(Math.atan2(grav.x,grav.y)*-1);
@@ -387,11 +414,11 @@ function drawPath(){ if(!S.corked||S.phase!=='play') return; const c=S.cannon, v
   for(let i=0;i<150;i++){ vx+=grav.x*G*dt; vy+=grav.y*G*dt; vz+=grav.z*G*dt; x+=vx*dt; y+=vy*dt; z+=vz*dt;
     if(z<D) continue; if(i%3) continue; const [sx,sy,sc]=P(x,y,z); const rr=Math.max(1.5,sc*K*.5); if(z<D+2){ const fi=.5; if(Math.abs(x)>W/2-fi||Math.abs(y)>H/2-fi) break; }
     ctx.beginPath(); ctx.arc(sx,sy,rr,0,7); ctx.fill(); } }
-function drawReticle(){ if(!S.corked||(S.phase!=='play'&&S.phase!=='fuse')) return; const r=cw*.06;
+function drawReticle(){ if(!canLaunch()) return; const r=cw*.06;
   ctx.strokeStyle='rgba(255,60,60,.9)'; ctx.lineWidth=2*devicePixelRatio;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
   for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) line([cx+dx*r*.5,cy+dy*r*.5],[cx+dx*r*1.5,cy+dy*r*1.5]);
-  if(S.charging||S.charge>0){ ctx.strokeStyle='#ffdd57'; ctx.lineWidth=5*devicePixelRatio; ctx.beginPath(); ctx.arc(cx,cy,r*1.9,-Math.PI/2,-Math.PI/2+S.charge*Math.PI*2); ctx.stroke(); } }
+}
 function drawThreadRetract(){ if(S.phase!=='retract') return; const c=S.cannon, m=P(c.x,c.y,c.z+.9), far=[cx,cy], k=1-Math.min(1,S.pt/.6);
   ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,[m[0]+(far[0]-m[0])*k,m[1]+(far[1]-m[1])*k]); }
 function drawThreadInBox(){ if(S.phase!=='fly'&&S.phase!=='reel') return; const c=S.cannon, p=S.pang, m=P(c.x,c.y,c.z+.9);
@@ -422,8 +449,9 @@ function render(){
   for(const m of S.marbles) items.push({z:m.z,f:()=>drawMarble(m)});
   items.push({z:S.pang.z,f:()=>drawPang(S.pang)});
   items.push({z:S.cannon.z,f:()=>drawCannon()});
+  for(const q of S.projs) if(q.z<=D) items.push({z:q.z,f:()=>drawProj(q)});
   items.sort((a,b)=>b.z-a.z).forEach(i=>i.f());
-  drawThreadInBox(); drawThreadRetract(); drawReticle(); drawHud(); drawTilt(); drawShutter();
+  drawParticles(true); drawThreadInBox(); drawThreadRetract(); drawReticle(); drawHud(); drawTilt(); drawShutter();
 }
 let last=performance.now();
 function loop(now){ const dt=Math.min(.033,(now-last)/1000); last=now; try{ update(dt); render(); }catch(e){ say('Error: '+e.message); } requestAnimationFrame(loop); }
