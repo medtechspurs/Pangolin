@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v1.3</p>
+  <p style="font-size:13px;opacity:.7">v1.4</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -79,8 +79,8 @@ function P(x,y,z){ const s=F/(F+z); return [cx+x*s*K, cy+y*s*K, s]; }
 let ori={a:0,b:90,g:0};
 function onOri(e){ if(e.beta==null) return; base=true; ori={a:e.alpha||0,b:e.beta,g:e.gamma||0}; }
 function onMotion(e){ const a=e.acceleration; if(!a||a.x==null) return;
-  // device accel (m/s^2) -> box frame, in inches; objects feel the opposite of the box's acceleration
-  const k=39.37; acc={x:a.x*k, y:-a.y*k, z:-a.z*k};   // iOS reports acceleration with the sign reversed from the spec
+  // device accel (m/s^2) -> box frame; objects feel the opposite of the box's acceleration
+  const k=G/9.81; acc={x:a.x*k, y:-a.y*k, z:-a.z*k};   // same units as sim gravity: 1 g of phone motion = 1 g in the box   // iOS reports acceleration with the sign reversed from the spec
   accAt=performance.now(); }
 const keys={};
 addEventListener('keydown',e=>{keys[e.key]=1; if(e.key===' ')dropBoulder(); if(e.key==='r')toggleMode();});
