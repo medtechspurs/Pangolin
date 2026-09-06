@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v0.2</p>
+  <p style="font-size:13px;opacity:.7">v0.3</p>
   <p>Your phone is a window into a foot-deep box. Tip the phone's top edge toward you to roll things toward the glass. Tip it sideways to steer.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -53,6 +53,7 @@ function newState(){
   return {
     pang:{x:0,z:D-1.2,vx:0,vz:0,r:.45,rolling:false,alive:true},
     boulders:[], stock:3,
+    marbles:[{x:-1.5,z:10.5},{x:1.8,z:9.6},{x:0.4,z:6.5},{x:-2,z:4},{x:2.2,z:2.2}].map(m=>({...m,vx:0,vz:0,r:.22})),
     barriers:[{z:8.5,hp:1},{z:5,hp:1}],
     robots:[{x:-1.6,z:7,on:true},{x:1.5,z:3.2,on:true}],
     won:false, t:0
@@ -143,8 +144,14 @@ function update(dt){
     }
     for(const r of S.robots) if(r.on && Math.hypot(r.x-b.x,r.z-b.z)<b.r+.5){ r.on=false; b.vz*=.5; say('Robot decommissioned') }
   }
-  for(let i=0;i<S.boulders.length;i++) for(let j=i+1;j<S.boulders.length;j++){
-    const a=S.boulders[i],b=S.boulders[j]; const dx=b.x-a.x,dz=b.z-a.z,d=Math.hypot(dx,dz),m=a.r+b.r;
+  for(const m of S.marbles){
+    stepBody(m,dt,.997);
+    for(const w of S.barriers) if(w.hp>0 && Math.abs(m.z-w.z)<.3){ m.z=m.vz<0? w.z+.3 : w.z-.3; m.vz*=-.5; }
+    for(const r of S.robots){ const dx=m.x-r.x,dz=m.z-r.z,d=Math.hypot(dx,dz); if(d<.75&&d>0){m.x=r.x+dx/d*.75;m.z=r.z+dz/d*.75;m.vx*=-.5;m.vz*=-.5;} }
+  }
+  const balls=[...S.boulders,...S.marbles];
+  for(let i=0;i<balls.length;i++) for(let j=i+1;j<balls.length;j++){
+    const a=balls[i],b=balls[j]; const dx=b.x-a.x,dz=b.z-a.z,d=Math.hypot(dx,dz),m=a.r+b.r;
     if(d<m&&d>0){const nx=dx/d,nz=dz/d,o=(m-d)/2; a.x-=nx*o;a.z-=nz*o;b.x+=nx*o;b.z+=nz*o;
       const p=(a.vx-b.vx)*nx+(a.vz-b.vz)*nz; a.vx-=p*nx;a.vz-=p*nz;b.vx+=p*nx;b.vz+=p*nz;}
   }
@@ -182,6 +189,9 @@ function shadow(x,z,r){ const [sx,sy,s]=P(x,H/2,z); ctx.fillStyle='rgba(0,0,0,.2
 function drawBoulder(b){ shadow(b.x,b.z,b.r); const [sx,sy,s]=P(b.x,H/2-b.r,b.z), R=b.r*s*K;
   ctx.fillStyle='#7d7469'; ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fill();
   ctx.fillStyle='#9a9186'; ctx.beginPath(); ctx.arc(sx-R*.3,sy-R*.3,R*.45,0,7); ctx.fill(); }
+function drawMarble(m){ shadow(m.x,m.z,m.r); const [sx,sy,s]=P(m.x,H/2-m.r,m.z), R=m.r*s*K;
+  ctx.fillStyle='#3f7fa6'; ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fill();
+  ctx.fillStyle='#bfe3f5'; ctx.beginPath(); ctx.arc(sx-R*.35,sy-R*.35,R*.35,0,7); ctx.fill(); }
 function drawBarrier(w){ if(w.hp<=0) return; const h=H/2;
   for(let i=0;i<3;i++){ const y=h-.3-i*.5; const a=P(-W/2,y,w.z),b=P(W/2,y,w.z);
     ctx.strokeStyle='#5a3b26'; ctx.lineWidth=.42*a[2]*K; line(a,b); } }
@@ -211,6 +221,7 @@ function render(){
   for(const w of S.barriers) items.push({z:w.z,f:()=>drawBarrier(w)});
   for(const r of S.robots) items.push({z:r.z,f:()=>drawRobot(r)});
   for(const b of S.boulders) items.push({z:b.z,f:()=>drawBoulder(b)});
+  for(const m of S.marbles) items.push({z:m.z,f:()=>drawMarble(m)});
   items.push({z:S.pang.z,f:()=>drawPang(S.pang)});
   items.sort((a,b)=>b.z-a.z).forEach(i=>i.f());
   drawTilt();
