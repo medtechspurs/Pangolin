@@ -37,7 +37,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v2.3</p>
+  <p style="font-size:13px;opacity:.7">v2.4</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll into the cannon. Turn the phone to aim the far window at a saucer, hold Launch to charge, and let go. One shot per level.</p>
   <button id="start">Start (allow tilt)</button>
@@ -58,7 +58,7 @@ function newState(n){
   const r=rng(n*7919+13), k=n%3;
   const barriers=[[{z:8.5,hp:1},{z:5,hp:1}],[{z:9,hp:1},{z:6.5,hp:1},{z:4,hp:1}],[{z:7,hp:1}]][k];
   const robots=[[[-1.6,7],[1.5,3.2]],[[0,7.8],[-1.8,5.2],[1.8,3]],[[-1.2,5.5],[1.2,5.5]]][k].map(([x,z])=>ball(x,0,z,.5,{on:true,rest:.35}));
-  const ufos=[]; const n_u=5+k; for(let i=0;i<n_u;i++) ufos.push({yaw:r()*360, el:2+r()*12, dist:250+r()*1400, spd:(r()*4-2), bob:r()*6.28, alive:true});
+  const ufos=[]; const n_u=5+k; for(let i=0;i<n_u;i++) ufos.push({yaw:r()*360, el:2+r()*12, dist:250+r()*1400, spd:(r()*4-2), bob:r()*6.28, alive:true, fall:0, vfall:0, tilt:0});
   return {
     pang:ball(0,0,D-1.2,.45,{rolling:false,alive:true,pinned:true,rest:.5}),
     cannon:ball(0,0,1.7,.7,{pinned:true}),
@@ -155,7 +155,7 @@ function orient(){
 const wrap=d=>((d+180)%360+360)%360-180;
 function ufoBox(u,o){ // saucer position in the box's frame for the current orientation
   const dy=wrap(u.yaw-o.yaw)*Math.PI/180, de=(u.el+Math.sin(u.bob)*.6+o.pitch)*Math.PI/180;   // looking up is negative pitch (matches the sky)
-  return {x:u.dist*Math.sin(dy)*Math.cos(de), y:-u.dist*Math.sin(de), z:u.dist*Math.cos(dy)*Math.cos(de), r:14+u.dist*.045}; }
+  return {x:u.dist*Math.sin(dy)*Math.cos(de), y:-u.dist*Math.sin(de)+u.fall, z:u.dist*Math.cos(dy)*Math.cos(de), r:14+u.dist*.045}; }
 
 // ---------- physics ----------
 const G=62, FRIC=.996, MOTION_GAIN=1.8, LIFT_GAIN=2.0;
@@ -192,7 +192,7 @@ function update(dt){
   if(base){ const [ux,uy,uz]=upVec(); grav={x:-ux,y:uy,z:uz}; }
   else { kb.x=(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0)||kb.x; kb.z=(keys.ArrowDown?1:0)-(keys.ArrowUp?1:0)||kb.z;
          const n=Math.hypot(kb.x,1,kb.z); grav={x:kb.x/n,y:1/n,z:kb.z/n}; if(!drag&&!Object.values(keys).some(v=>v)) kb={x:0,z:0}; }
-  for(const u of S.ufos){ u.yaw+=u.spd*dt; u.bob+=dt; }
+  for(const u of S.ufos){ if(u.alive){ u.yaw+=u.spd*dt; u.bob+=dt; } else { u.vfall+=G*dt; u.fall=Math.min(u.fall+u.vfall*dt, u.dist*Math.sin(u.el*Math.PI/180)+u.dist*.02); u.tilt+=dt*2.5; } }
   const p=S.pang;
   // box physics runs in every phase so the world stays alive
   for(const b of S.boulders){ b.smash=true; stepBody(b,dt); wallHit(b); }
@@ -223,7 +223,10 @@ function update(dt){
     p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
     const o=orient();
     for(const u of S.ufos){ if(!u.alive) continue; const b=ufoBox(u,o);
-      if(Math.hypot(p.x-b.x,p.y-b.y,p.z-b.z)<b.r+p.r+6){ u.alive=false; kills++; S.shotScore=Math.round(u.dist/10)*10; total+=S.shotScore; say(`Hit! +${S.shotScore}`); S.phase='reel'; S.pt=0; break; } }
+      const dx=p.x-b.x,dy=p.y-b.y,dz=p.z-b.z,d=Math.hypot(dx,dy,dz),m=b.r+p.r;
+      if(d<m&&d>0){ const nx=dx/d,ny=dy/d,nz=dz/d, vn=p.vx*nx+p.vy*ny+p.vz*nz, e=1.6;   // reflect off the saucer, restitution .6
+        if(vn<0){ p.vx-=e*vn*nx; p.vy-=e*vn*ny; p.vz-=e*vn*nz; } p.x=b.x+nx*m; p.y=b.y+ny*m; p.z=b.z+nz*m;
+        u.alive=false; u.vfall=-vn*.15; kills++; S.shotScore=Math.round(u.dist/10)*10; total+=S.shotScore; say(`Hit! +${S.shotScore}`); sh.t=Math.max(sh.t,3.4); break; } }
     const far=Math.hypot(p.x,p.y,p.z);
     if(S.phase==='fly'&&(sh.t>5||far>2200||(p.z>D&&p.y>1200))){ S.phase='reel'; S.pt=0; if(!S.shotScore) say('Missed'); }
   } else if(S.phase==='reel'){
@@ -252,10 +255,15 @@ function line(a,b){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);c
 function poly(pts,keep){ if(!keep) ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
 function hill(deg){ return 14*Math.abs(Math.sin(deg*.05+1))+6*Math.sin(deg*.13)+4*Math.sin(deg*.31); }
 const clouds=[]; for(let i=0;i<24;i++) clouds.push({yaw:i*15+(i*37%11), el:12+(i*53%20), s:.05+((i*17)%5)*.012});
-function drawUfo(x,y,r,alive){
-  ctx.fillStyle=alive?'#b9c4cf':'#5a5f66'; ctx.beginPath(); ctx.ellipse(x,y,r,r*.32,0,0,7); ctx.fill();
-  ctx.fillStyle=alive?'#e8f4ff':'#7a8088'; ctx.beginPath(); ctx.ellipse(x,y-r*.22,r*.45,r*.3,0,Math.PI,0); ctx.fill();
-  if(alive){ ctx.fillStyle='#ffdd57'; for(let i=-2;i<=2;i++){ ctx.beginPath(); ctx.arc(x+i*r*.35,y+r*.1,Math.max(1,r*.06),0,7); ctx.fill(); } }
+function drawUfo(x,y,r,u){
+  ctx.save(); ctx.translate(x,y); ctx.rotate(u.alive?0:Math.sin(u.tilt)*.5);
+  const g=ctx.createLinearGradient(-r,0,r,0); g.addColorStop(0,u.alive?'#7d8994':'#3f444a'); g.addColorStop(.45,u.alive?'#d7e0e8':'#6a7078'); g.addColorStop(1,u.alive?'#6b7681':'#33373c');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(0,0,r,r*.32,0,0,7); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(0,r*.1,r*.95,r*.2,0,0,Math.PI); ctx.fill();   // underside shade
+  const d=ctx.createRadialGradient(-r*.15,-r*.4,r*.05,0,-r*.22,r*.5); d.addColorStop(0,u.alive?'#ffffff':'#8a9099'); d.addColorStop(1,u.alive?'#8fb8d8':'#4d545c');
+  ctx.fillStyle=d; ctx.beginPath(); ctx.ellipse(0,-r*.22,r*.45,r*.3,0,Math.PI,0); ctx.fill();
+  if(u.alive){ for(let i=-2;i<=2;i++){ ctx.fillStyle=(Math.floor(u.bob*4)+i)%2?'#ffdd57':'#ff8c42'; ctx.beginPath(); ctx.arc(i*r*.35,r*.1,Math.max(1,r*.06),0,7); ctx.fill(); } }
+  ctx.restore();
 }
 function drawOutside(){
   const o=orient(), ppd=cw/60, big=Math.hypot(cw,ch)*1.2;
@@ -286,7 +294,7 @@ function drawOutside(){
   ctx.restore();
   // saucers and the pangolin in flight live in the box frame, so they project like everything else
   const bodies=[...S.ufos].map(u=>({u,b:ufoBox(u,o)})).filter(q=>q.b.z>D).sort((a,b)=>b.b.z-a.b.z);
-  for(const {u,b} of bodies){ const [sx,sy,sc]=P(b.x,b.y,b.z); drawUfo(sx,sy,b.r*sc*K,u.alive); }
+  for(const {u,b} of bodies){ const [sx,sy,sc]=P(b.x,b.y,b.z); drawUfo(sx,sy,b.r*sc*K,u); }
   const p=S.pang;
   if((S.phase==='fly'||S.phase==='reel')&&p.z>D){ const c=S.cannon, m=P(c.x,c.y,c.z+.9), q=P(p.x,p.y,p.z);
     ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,q);
@@ -321,8 +329,8 @@ function shadow(b){
   ctx.fillStyle='rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(sx,sy,b.r*s*K,b.r*s*K*.5,0,0,7); ctx.fill();
 }
 function sph(b,c1,c2){ shadow(b); const [sx,sy,s]=P(b.x,b.y,b.z), R=b.r*s*K;
-  ctx.fillStyle=c1; ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fill();
-  ctx.fillStyle=c2; ctx.beginPath(); ctx.arc(sx-R*.32,sy-R*.32,R*.4,0,7); ctx.fill(); }
+  const g=ctx.createRadialGradient(sx-R*.35,sy-R*.35,R*.1,sx,sy,R); g.addColorStop(0,c2); g.addColorStop(.55,c1); g.addColorStop(1,'rgba(0,0,0,.85)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fill(); }
 function drawBoulder(b){ sph(b,'#7d7469','#9a9186'); }
 function drawMarble(m){ sph(m,'#3f7fa6','#bfe3f5'); }
 function drawBarrier(w){ if(w.hp<=0) return; const h=H/2;
@@ -349,7 +357,8 @@ function drawCannon(){ const c=S.cannon, z0=c.z-.7, z1=c.z+.9, r=.62;
     for(let i=1;i<=n;i++){ const t=i/24; tipx=fx+ra*.9*Math.sin(t*4)*t; tipy=fy-ra*1.3*t; ctx.lineTo(tipx,tipy); } ctx.stroke();
     if(burn>0){ ctx.fillStyle='#ff9a1f'; ctx.beginPath(); ctx.arc(tipx,tipy,ra*.16+Math.random()*ra*.08,0,7); ctx.fill();
       ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(tipx,tipy,ra*.07,0,7); ctx.fill(); } } }
-function drawPangBall(R,alpha){ ctx.globalAlpha=alpha; ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fill();
+function drawPangBall(R,alpha){ ctx.globalAlpha=alpha; const g=ctx.createRadialGradient(-R*.35,-R*.35,R*.1,0,0,R); g.addColorStop(0,'#d19a55'); g.addColorStop(.6,'#a8702f'); g.addColorStop(1,'#5e3a15');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fill();
   ctx.strokeStyle='#6d4318'; ctx.lineWidth=Math.max(1,R*.12); for(let i=0;i<4;i++){ ctx.beginPath(); ctx.arc(0,0,R*(.35+i*.2),i*.7,i*.7+2.4); ctx.stroke(); } ctx.globalAlpha=1; }
 function drawPang(p){ if(S.corked||S.phase==='fuse'||S.phase==='fly'||S.phase==='reel') return; shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
   ctx.save(); ctx.translate(sx,sy); if(!p.alive) ctx.globalAlpha=.5;
@@ -407,7 +416,7 @@ function render(){
   items.push({z:S.pang.z,f:()=>drawPang(S.pang)});
   items.push({z:S.cannon.z,f:()=>drawCannon()});
   items.sort((a,b)=>b.z-a.z).forEach(i=>i.f());
-  drawThreadInBox(); drawThreadRetract(); drawMarkers(); drawReticle(); drawHud(); drawTilt(); drawShutter();
+  drawThreadInBox(); drawThreadRetract(); drawReticle(); drawHud(); drawTilt(); drawShutter();
 }
 let last=performance.now();
 function loop(now){ const dt=Math.min(.033,(now-last)/1000); last=now; try{ update(dt); render(); }catch(e){ say('Error: '+e.message); } requestAnimationFrame(loop); }
