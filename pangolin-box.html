@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v0.3</p>
+  <p style="font-size:13px;opacity:.7">v0.4</p>
   <p>Your phone is a window into a foot-deep box. Tip the phone's top edge toward you to roll things toward the glass. Tip it sideways to steer.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -128,6 +128,7 @@ function stepBody(b,dt,fric){
   const lim=W/2-b.r;
   if(b.x<-lim){b.x=-lim;b.vx*=-.4} if(b.x>lim){b.x=lim;b.vx*=-.4}
   if(b.z>D-b.r){b.z=D-b.r;b.vz*=-.4}
+  if(b.z<b.r){b.z=b.r;b.vz*=-.4}
 }
 function update(dt){
   if(S.won) return; S.t+=dt;
@@ -169,16 +170,37 @@ function update(dt){
 
 // ---------- render ----------
 function line(a,b){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}
+function poly(pts){ ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
+function drawOutside(){
+  const g=ctx.createLinearGradient(0,0,0,ch); g.addColorStop(0,'#7fb7e0'); g.addColorStop(.55,'#d9eaf4'); g.addColorStop(.56,'#8fae5c'); g.addColorStop(1,'#5f7f3c');
+  ctx.fillStyle=g; ctx.fillRect(0,0,cw,ch);
+  ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(cw*.78,ch*.16,cw*.05,0,7); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  for(const [x,y,r] of [[.15,.2,.05],[.22,.19,.065],[.3,.21,.045],[.55,.3,.04],[.62,.29,.055]]){ ctx.beginPath(); ctx.arc(cw*x,ch*y,cw*r,0,7); ctx.fill(); }
+  ctx.fillStyle='#6f8f4a'; ctx.beginPath(); ctx.moveTo(0,ch*.56);
+  for(let i=0;i<=20;i++){ const t=i/20; ctx.lineTo(cw*t, ch*(.56-.09*Math.abs(Math.sin(t*7+1))-.03*Math.sin(t*19))); }
+  ctx.lineTo(cw,ch*.6); ctx.lineTo(0,ch*.6); ctx.fill();
+  ctx.fillStyle='#4d6b34'; for(let i=0;i<14;i++){ const x=cw*(i/13), y=ch*.57; ctx.beginPath(); ctx.moveTo(x,y-ch*.06); ctx.lineTo(x-cw*.02,y); ctx.lineTo(x+cw*.02,y); ctx.fill(); }
+}
 function drawBox(){
-  ctx.fillStyle='#4a3527'; ctx.fillRect(0,0,cw,ch);
-  const h=H/2,w=W/2;
+  drawOutside();
+  const h=H/2,w=W/2, z0=3, z1=9;
   // floor
-  ctx.fillStyle='#c9a46e'; ctx.beginPath();
-  let a=P(-w,h,0),b=P(w,h,0),c=P(w,h,D),d=P(-w,h,D);
-  ctx.moveTo(...a);ctx.lineTo(...b);ctx.lineTo(...c);ctx.lineTo(...d);ctx.fill();
+  ctx.fillStyle='#c9a46e'; poly([P(-w,h,0),P(w,h,0),P(w,h,D),P(-w,h,D)]); ctx.fill();
   // far wall
-  ctx.fillStyle='#6b4b33'; ctx.beginPath(); a=P(-w,-h,D);b=P(w,-h,D);c=P(w,h,D);d=P(-w,h,D);
-  ctx.moveTo(...a);ctx.lineTo(...b);ctx.lineTo(...c);ctx.lineTo(...d);ctx.fill();
+  ctx.fillStyle='#6b4b33'; poly([P(-w,-h,D),P(w,-h,D),P(w,h,D),P(-w,h,D)]); ctx.fill();
+  // side walls and ceiling with window cutouts (evenodd)
+  ctx.fillStyle='#4a3527';
+  poly([P(-w,-h,0),P(-w,-h,D),P(-w,h,D),P(-w,h,0)]); poly([P(-w,-1.1,z0),P(-w,-1.1,z1),P(-w,.4,z1),P(-w,.4,z0)]); ctx.fill('evenodd');
+  poly([P(w,-h,0),P(w,-h,D),P(w,h,D),P(w,h,0)]);     poly([P(w,-1.1,z0),P(w,-1.1,z1),P(w,.4,z1),P(w,.4,z0)]);     ctx.fill('evenodd');
+  ctx.fillStyle='#3b2b21';
+  poly([P(-w,-h,0),P(w,-h,0),P(w,-h,D),P(-w,-h,D)]); poly([P(-2,-h,z0),P(2,-h,z0),P(2,-h,z1),P(-2,-h,z1)]); ctx.fill('evenodd');
+  // window frames
+  ctx.strokeStyle='#2a1d14'; ctx.lineWidth=2*devicePixelRatio;
+  poly([P(-w,-1.1,z0),P(-w,-1.1,z1),P(-w,.4,z1),P(-w,.4,z0)]); ctx.stroke();
+  poly([P(w,-1.1,z0),P(w,-1.1,z1),P(w,.4,z1),P(w,.4,z0)]); ctx.stroke();
+  poly([P(-2,-h,z0),P(2,-h,z0),P(2,-h,z1),P(-2,-h,z1)]); ctx.stroke();
+  // floor grid + box edges
   ctx.strokeStyle='rgba(42,29,20,.45)'; ctx.lineWidth=1.5*devicePixelRatio;
   for(let z=0;z<=D;z+=2){ line(P(-w,h,z),P(w,h,z)); }
   for(let x=-w;x<=w;x+=1){ line(P(x,h,0),P(x,h,D)); }
@@ -227,7 +249,7 @@ function render(){
   drawTilt();
 }
 let last=performance.now();
-function loop(now){ const dt=Math.min(.033,(now-last)/1000); last=now; update(dt); render(); requestAnimationFrame(loop); }
+function loop(now){ const dt=Math.min(.033,(now-last)/1000); last=now; try{ update(dt); render(); }catch(e){ say('Error: '+e.message); } requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
 </script>
 </body>
