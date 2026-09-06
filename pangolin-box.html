@@ -88,9 +88,17 @@ addEventListener('pointermove',e=>{ if(!drag) return;
   tilt.z=Math.max(-1,Math.min(1,(e.clientY-drag.y)/120)); });
 
 document.getElementById('start').onclick=async()=>{
-  try{ if(DeviceOrientationEvent.requestPermission){ const r=await DeviceOrientationEvent.requestPermission(); if(r==='granted') addEventListener('deviceorientation',onOri); }
-       else addEventListener('deviceorientation',onOri); }catch(e){}
+  let status='';
+  try{
+    if(typeof DeviceOrientationEvent==='undefined'){ status='Tilt not available here: open in Safari'; }
+    else if(DeviceOrientationEvent.requestPermission){
+      const r=await DeviceOrientationEvent.requestPermission();
+      if(r==='granted') addEventListener('deviceorientation',onOri); else status='Tilt denied: clear site data in Settings > Safari and retry';
+    } else addEventListener('deviceorientation',onOri);
+  }catch(e){ status='Tilt blocked: '+e.message; }
   document.getElementById('big').style.display='none';
+  if(status) say(status);
+  else setTimeout(()=>{ if(!base) say('No tilt events: use Safari, not an in-app viewer'); },2000);
 };
 document.getElementById('big').style.display='flex';
 
