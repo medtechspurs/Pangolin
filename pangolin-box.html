@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v0.4</p>
+  <p style="font-size:13px;opacity:.7">v0.5</p>
   <p>Your phone is a window into a foot-deep box. Tip the phone's top edge toward you to roll things toward the glass. Tip it sideways to steer.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -72,8 +72,9 @@ const F=7;                       // focal length in inches
 function P(x,y,z){ const s=F/(F+z); return [cx+x*s*K, cy+y*s*K, s]; }
 
 // ---------- input ----------
+let ori={a:0,b:90,g:0};
 function onOri(e){
-  if(e.beta==null) return;
+  if(e.beta==null) return; ori={a:e.alpha||0,b:e.beta,g:e.gamma||0};
   if(!base) base={b:e.beta,g:e.gamma};
   const db=(e.beta-base.b)*Math.PI/180, dg=(e.gamma-base.g)*Math.PI/180;
   tilt.z=Math.max(-1,Math.min(1,-Math.sin(db)*1.6)); // top edge toward you => things roll to viewport (z decreasing)
@@ -82,12 +83,13 @@ function onOri(e){
 const keys={};
 addEventListener('keydown',e=>{keys[e.key]=1; if(e.key===' ')dropBoulder(); if(e.key==='r')toggleMode();});
 addEventListener('keyup',e=>{keys[e.key]=0});
-let drag=null;
+let drag=null, viewYaw=0, viewPitch=0;
 cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY}});
 addEventListener('pointerup',()=>{drag=null; if(!base) tilt={x:0,z:0}});
 addEventListener('pointermove',e=>{ if(!drag) return;
   tilt.x=Math.max(-1,Math.min(1,(e.clientX-drag.x)/120));
-  tilt.z=Math.max(-1,Math.min(1,(e.clientY-drag.y)/120)); });
+  tilt.z=Math.max(-1,Math.min(1,(e.clientY-drag.y)/120));
+  if(!base){ viewYaw=(e.clientX-drag.x)/6; viewPitch=-(e.clientY-drag.y)/6; } });
 
 document.getElementById('start').onclick=async()=>{
   let status='';
@@ -171,16 +173,48 @@ function update(dt){
 // ---------- render ----------
 function line(a,b){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}
 function poly(pts){ ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
+function orient(){
+  // world-up vector in device frame from alpha/beta/gamma
+  const b=ori.b*Math.PI/180,g=ori.g*Math.PI/180;
+  const ux=-Math.cos(b)*Math.sin(g), uy=Math.sin(b), uz=Math.cos(b)*Math.cos(g);
+  if(!base) return {yaw:viewYaw, pitch:viewPitch, roll:0};
+  return { yaw:-ori.a, pitch:Math.atan2(uz,Math.hypot(ux,uy))*180/Math.PI, roll:Math.atan2(ux,uy) };
+}
+function hill(deg){ return 14*Math.abs(Math.sin(deg*.05+1))+6*Math.sin(deg*.13)+4*Math.sin(deg*.31); }
+const clouds=[]; for(let i=0;i<24;i++) clouds.push({yaw:i*15+(i*37%11), el:12+(i*53%20), s:.05+((i*17)%5)*.012});
 function drawOutside(){
-  const g=ctx.createLinearGradient(0,0,0,ch); g.addColorStop(0,'#7fb7e0'); g.addColorStop(.55,'#d9eaf4'); g.addColorStop(.56,'#8fae5c'); g.addColorStop(1,'#5f7f3c');
-  ctx.fillStyle=g; ctx.fillRect(0,0,cw,ch);
-  ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(cw*.78,ch*.16,cw*.05,0,7); ctx.fill();
-  ctx.fillStyle='rgba(255,255,255,.85)';
-  for(const [x,y,r] of [[.15,.2,.05],[.22,.19,.065],[.3,.21,.045],[.55,.3,.04],[.62,.29,.055]]){ ctx.beginPath(); ctx.arc(cw*x,ch*y,cw*r,0,7); ctx.fill(); }
-  ctx.fillStyle='#6f8f4a'; ctx.beginPath(); ctx.moveTo(0,ch*.56);
-  for(let i=0;i<=20;i++){ const t=i/20; ctx.lineTo(cw*t, ch*(.56-.09*Math.abs(Math.sin(t*7+1))-.03*Math.sin(t*19))); }
-  ctx.lineTo(cw,ch*.6); ctx.lineTo(0,ch*.6); ctx.fill();
-  ctx.fillStyle='#4d6b34'; for(let i=0;i<14;i++){ const x=cw*(i/13), y=ch*.57; ctx.beginPath(); ctx.moveTo(x,y-ch*.06); ctx.lineTo(x-cw*.02,y); ctx.lineTo(x+cw*.02,y); ctx.fill(); }
+  const o=orient(), ppd=cw/60, big=Math.hypot(cw,ch)*1.2;
+  ctx.save(); ctx.translate(cx,cy); ctx.rotate(o.roll);
+  const hy=o.pitch*ppd;                      // horizon y (looking up moves horizon down)
+  const sky=ctx.createLinearGradient(0,hy-90*ppd,0,hy); sky.addColorStop(0,'#3d86c6'); sky.addColorStop(.7,'#8fc3e8'); sky.addColorStop(1,'#e2eef6');
+  ctx.fillStyle=sky; ctx.fillRect(-big,-big,2*big,big+hy);
+  const gnd=ctx.createLinearGradient(0,hy,0,hy+60*ppd); gnd.addColorStop(0,'#9dbb63'); gnd.addColorStop(1,'#4f7233');
+  ctx.fillStyle=gnd; ctx.fillRect(-big,hy,2*big,big-hy);
+  const wrap=d=>((d+180)%360+360)%360-180;
+  // sun
+  const sxx=wrap(140-o.yaw)*ppd, syy=hy-45*ppd;
+  ctx.fillStyle='rgba(255,243,176,.35)'; ctx.beginPath(); ctx.arc(sxx,syy,cw*.11,0,7); ctx.fill();
+  ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(sxx,syy,cw*.05,0,7); ctx.fill();
+  // clouds
+  ctx.fillStyle='rgba(255,255,255,.9)';
+  for(const c of clouds){ const x=wrap(c.yaw-o.yaw)*ppd, y=hy-c.el*ppd, r=cw*c.s;
+    if(Math.abs(x)>big) continue; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.arc(x+r*.9,y+r*.2,r*.8,0,7); ctx.arc(x-r*.9,y+r*.25,r*.7,0,7); ctx.fill(); }
+  // hills along the horizon
+  ctx.fillStyle='#6f8f4a'; ctx.beginPath(); ctx.moveTo(-big,hy+2);
+  for(let x=-big;x<=big;x+=cw/40){ ctx.lineTo(x, hy-hill(o.yaw+x/ppd)*ppd*.35); }
+  ctx.lineTo(big,hy+2); ctx.fill();
+  ctx.fillStyle='#4d6b34'; ctx.beginPath(); ctx.moveTo(-big,hy+2);
+  for(let x=-big;x<=big;x+=cw/40){ ctx.lineTo(x, hy-hill(o.yaw*1.6+x/ppd+90)*ppd*.18); }
+  ctx.lineTo(big,hy+2); ctx.fill();
+  // meadow: tufts and flowers receding toward the horizon
+  for(let row=1;row<=9;row++){ const y=hy+ (row*row)*1.1*ppd, sc=row/9, sp=cw*.09*sc+cw*.03;
+    const off=wrap(o.yaw)*ppd*(.3+sc*.9);
+    for(let x=-big;x<=big;x+=sp){ const xx=x-(off%sp), k=Math.floor((x+row*977)/sp);
+      ctx.fillStyle=(k%5===0)?'#f2d13b':(k%7===0)?'#e9eef4':'#3f6b2b';
+      if(k%5===0||k%7===0){ ctx.beginPath(); ctx.arc(xx,y,sc*cw*.006+1,0,7); ctx.fill(); }
+      else { ctx.fillRect(xx,y-sc*cw*.02,Math.max(1,sc*cw*.004),sc*cw*.02); } }
+  }
+  ctx.restore();
 }
 function drawBox(){
   drawOutside();
