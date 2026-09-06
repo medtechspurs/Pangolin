@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v1.0</p>
+  <p style="font-size:13px;opacity:.7">v1.1</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -47,17 +47,17 @@ const W=6, D=12; let H=12;       // box width, depth (inches); height follows th
 const cv=document.getElementById('c'), ctx=cv.getContext('2d');
 const msg=document.getElementById('msg');
 let grav={x:0,y:1,z:0};          // gravity direction in box frame: x right, y down (screen), z into the box
-let flick={x:0,y:0,z:0};
+let acc={x:0,y:0,z:0}, accAt=0;   // inertial force from phone acceleration, box frame, in/s^2
 let base=null;                   // set once orientation events arrive
 let S;
 const ball=(x,y,z,r,extra)=>Object.assign({x,y,z,vx:0,vy:0,vz:0,r},extra||{});
 function newState(){
   return {
-    pang:ball(0,0,D-1.2,.45,{rolling:false,alive:true,pinned:true}),
+    pang:ball(0,0,D-1.2,.45,{rolling:false,alive:true,pinned:true,rest:.5}),
     boulders:[], stock:3,
-    marbles:[[-1.5,10.5],[1.8,9.6],[.4,6.5],[-2,4],[2.2,2.2]].map(([x,z])=>ball(x,0,z,.22)),
+    marbles:[[-1.5,10.5],[1.8,9.6],[.4,6.5],[-2,4],[2.2,2.2]].map(([x,z])=>ball(x,0,z,.22,{rest:.75})),
     barriers:[{z:8.5,hp:1},{z:5,hp:1}],
-    robots:[ball(-1.6,0,7,.5,{on:true}),ball(1.5,0,3.2,.5,{on:true})],
+    robots:[ball(-1.6,0,7,.5,{on:true,rest:.35}),ball(1.5,0,3.2,.5,{on:true,rest:.35})],
     won:false, t:0
   };
 }
@@ -80,7 +80,7 @@ let ori={a:0,b:90,g:0};
 function onOri(e){ if(e.beta==null) return; base=true; ori={a:e.alpha||0,b:e.beta,g:e.gamma||0}; }
 function onMotion(e){ const a=e.acceleration; if(!a||a.x==null) return;
   // device accel (m/s^2) -> box frame, in inches; objects feel the opposite of the box's acceleration
-  const k=39.37; flick={x:-a.x*k, y:a.y*k, z:a.z*k}; }
+  const k=39.37; acc={x:-a.x*k, y:a.y*k, z:a.z*k}; accAt=performance.now(); }
 const keys={};
 addEventListener('keydown',e=>{keys[e.key]=1; if(e.key===' ')dropBoulder(); if(e.key==='r')toggleMode();});
 addEventListener('keyup',e=>{keys[e.key]=0});
@@ -110,7 +110,7 @@ document.getElementById('big').style.display='flex';
 const dropBtn=document.getElementById('drop'), modeBtn=document.getElementById('mode');
 function dropBoulder(){
   const p=S.pang; if(p.rolling||S.stock<=0||!p.alive||S.won) return;
-  S.stock--; S.boulders.push(ball(p.x,p.y,p.z-.9,.4));
+  S.stock--; S.boulders.push(ball(p.x,p.y,p.z-.9,.4,{rest:.25}));
   dropBtn.textContent=`Lay boulder (${S.stock})`;
 }
 function toggleMode(){
@@ -143,16 +143,18 @@ function orient(){
 }
 
 // ---------- physics ----------
-const G=32, REST=.45, FRIC=.996;
+const G=32, FRIC=.996;
 function stepBody(b,dt){
   if(b.pinned) return;
-  b.vx+=(grav.x*G+flick.x)*dt; b.vy+=(grav.y*G+flick.y)*dt; b.vz+=(grav.z*G+flick.z)*dt;
+  const f=(performance.now()-accAt<150)?acc:{x:0,y:0,z:0};   // ignore stale sensor data
+  b.vx+=(grav.x*G+f.x)*dt; b.vy+=(grav.y*G+f.y)*dt; b.vz+=(grav.z*G+f.z)*dt;
   b.vx*=FRIC; b.vy*=FRIC; b.vz*=FRIC;
   b.x+=b.vx*dt; b.y+=b.vy*dt; b.z+=b.vz*dt;
   const lx=W/2-b.r, ly=H/2-b.r;
-  if(b.x<-lx){b.x=-lx;b.vx*=-REST} if(b.x>lx){b.x=lx;b.vx*=-REST}
-  if(b.y<-ly){b.y=-ly;b.vy*=-REST} if(b.y>ly){b.y=ly;b.vy*=-REST}
-  if(b.z<b.r){b.z=b.r;b.vz*=-REST} if(b.z>D-b.r){b.z=D-b.r;b.vz*=-REST}
+  const R=b.rest??.45;
+  if(b.x<-lx){b.x=-lx;b.vx*=-R} if(b.x>lx){b.x=lx;b.vx*=-R}
+  if(b.y<-ly){b.y=-ly;b.vy*=-R} if(b.y>ly){b.y=ly;b.vy*=-R}
+  if(b.z<b.r){b.z=b.r;b.vz*=-R} if(b.z>D-b.r){b.z=D-b.r;b.vz*=-R}
 }
 function collide(a,b){
   const dx=b.x-a.x,dy=b.y-a.y,dz=b.z-a.z,d=Math.hypot(dx,dy,dz),m=a.r+b.r;
@@ -185,7 +187,6 @@ function update(dt){
     if(bo&&ro&&ro.on){ ro.on=false; say('Robot decommissioned'); }
     if((a===p||b===p)&&ro&&ro.on&&p.rolling&&p.alive){ p.alive=false; p.pinned=true; say('Caught! Tap reset'); }
   }
-  flick={x:flick.x*.6,y:flick.y*.6,z:flick.z*.6};
   if(p.alive&&p.rolling&&p.z<.7){ S.won=true; say('Pangolin made it home'); }
 }
 
