@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v1.2</p>
+  <p style="font-size:13px;opacity:.7">v1.3</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -144,7 +144,7 @@ function orient(){
 }
 
 // ---------- physics ----------
-const G=32, FRIC=.996;
+const G=48, FRIC=.996;
 function stepBody(b,dt){
   if(b.pinned) return;
   const f=(performance.now()-accAt<150)?acc:{x:0,y:0,z:0};   // ignore stale sensor data
