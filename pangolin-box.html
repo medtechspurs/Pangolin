@@ -37,7 +37,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v2.1</p>
+  <p style="font-size:13px;opacity:.7">v2.2</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll into the cannon. Turn the phone to aim the far window at a saucer, hold Launch to charge, and let go. One shot per level.</p>
   <button id="start">Start (allow tilt)</button>
@@ -58,7 +58,7 @@ function newState(n){
   const r=rng(n*7919+13), k=n%3;
   const barriers=[[{z:8.5,hp:1},{z:5,hp:1}],[{z:9,hp:1},{z:6.5,hp:1},{z:4,hp:1}],[{z:7,hp:1}]][k];
   const robots=[[[-1.6,7],[1.5,3.2]],[[0,7.8],[-1.8,5.2],[1.8,3]],[[-1.2,5.5],[1.2,5.5]]][k].map(([x,z])=>ball(x,0,z,.5,{on:true,rest:.35}));
-  const ufos=[]; const n_u=5+k; for(let i=0;i<n_u;i++) ufos.push({yaw:r()*360, el:8+r()*30, dist:250+r()*1400, spd:(r()*10-5), bob:r()*6.28, alive:true});
+  const ufos=[]; const n_u=5+k; for(let i=0;i<n_u;i++) ufos.push({yaw:r()*360, el:2+r()*12, dist:250+r()*1400, spd:(r()*4-2), bob:r()*6.28, alive:true});
   return {
     pang:ball(0,0,D-1.2,.45,{rolling:false,alive:true,pinned:true,rest:.5}),
     cannon:ball(0,0,1.7,.7,{pinned:true}),
@@ -154,7 +154,7 @@ function orient(){
 }
 const wrap=d=>((d+180)%360+360)%360-180;
 function ufoBox(u,o){ // saucer position in the box's frame for the current orientation
-  const dy=wrap(u.yaw-o.yaw)*Math.PI/180, de=(u.el+Math.sin(u.bob)*1.5-o.pitch)*Math.PI/180;
+  const dy=wrap(u.yaw-o.yaw)*Math.PI/180, de=(u.el+Math.sin(u.bob)*.6-o.pitch)*Math.PI/180;
   return {x:u.dist*Math.sin(dy)*Math.cos(de), y:-u.dist*Math.sin(de), z:u.dist*Math.cos(dy)*Math.cos(de), r:14+u.dist*.045}; }
 
 // ---------- physics ----------
@@ -362,6 +362,15 @@ function drawPang(p){ if(S.corked||S.phase==='fuse'||S.phase==='fly'||S.phase===
     ctx.fillStyle='#2a1d14'; ctx.beginPath(); ctx.arc(-R*1.5,R*.15,R*.08,0,7); ctx.fill();
     ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.moveTo(R*1.1,0); ctx.lineTo(R*2.1,R*.3); ctx.lineTo(R*1.1,R*.5); ctx.fill(); }
   ctx.restore(); }
+function drawMarkers(){ if(!S.corked||S.phase!=='play') return; const o=orient(), fi=.5, w=W/2-fi, h=H/2-fi;
+  const [x0,y0]=P(-w,-h,D), [x1,y1]=P(w,h,D);   // far-window rectangle on screen
+  for(const u of S.ufos){ if(!u.alive) continue; const b=ufoBox(u,o);
+    let sx,sy; if(b.z>1){ [sx,sy]=P(b.x,b.y,b.z); } else { sx=cx+Math.sign(b.x||1)*cw; sy=cy-b.y; }
+    if(sx>x0&&sx<x1&&sy>y0&&sy<y1&&b.z>D) continue;   // visible through the window
+    const dx=sx-cx, dy=sy-cy, ang=Math.atan2(dy,dx), rx=(x1-x0)/2+10*devicePixelRatio, ry=(y1-y0)/2+10*devicePixelRatio;
+    const t=1/Math.max(Math.abs(Math.cos(ang))/rx,Math.abs(Math.sin(ang))/ry), mx=cx+Math.cos(ang)*t, my=cy+Math.sin(ang)*t;
+    ctx.save(); ctx.translate(mx,my); ctx.rotate(ang); ctx.fillStyle='#ffdd57'; ctx.beginPath();
+    ctx.moveTo(8*devicePixelRatio,0); ctx.lineTo(-5*devicePixelRatio,-6*devicePixelRatio); ctx.lineTo(-5*devicePixelRatio,6*devicePixelRatio); ctx.fill(); ctx.restore(); } }
 function drawReticle(){ if(!S.corked||(S.phase!=='play'&&S.phase!=='fuse')) return; const r=cw*.06;
   ctx.strokeStyle='rgba(255,60,60,.9)'; ctx.lineWidth=2*devicePixelRatio;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
@@ -398,7 +407,7 @@ function render(){
   items.push({z:S.pang.z,f:()=>drawPang(S.pang)});
   items.push({z:S.cannon.z,f:()=>drawCannon()});
   items.sort((a,b)=>b.z-a.z).forEach(i=>i.f());
-  drawThreadInBox(); drawThreadRetract(); drawReticle(); drawHud(); drawTilt(); drawShutter();
+  drawThreadInBox(); drawThreadRetract(); drawMarkers(); drawReticle(); drawHud(); drawTilt(); drawShutter();
 }
 let last=performance.now();
 function loop(now){ const dt=Math.min(.033,(now-last)/1000); last=now; try{ update(dt); render(); }catch(e){ say('Error: '+e.message); } requestAnimationFrame(loop); }
