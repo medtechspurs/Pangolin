@@ -37,7 +37,7 @@
 </div>
 <div id="big">
   <h1>Pangolin</h1>
-  <p style="font-size:13px;opacity:.7">v2.7</p>
+  <p style="font-size:13px;opacity:.7">v2.8</p>
   <p>The robots have taken over. Humanity's last hope is the pangolins, who have been hiding one thing: they are very, very smart.</p>
   <p>Your phone is the open end of a box. Tip and turn it and the box goes with it. Lay boulders to decommission the robots, curl up, roll into the cannon, and aim the far window at a saucer. Hold Launch to charge. One shot per level. Rescue the humans.</p>
   <button id="start">Start (allow tilt)</button>
@@ -129,8 +129,8 @@ function fire(){ if(!S.charging) return; S.charging=false;
 function launchNow(){ const c=S.cannon, p=S.pang;
   S.shot={t:0}; S.corked=false; p.pinned=false; p.rolling=true; p.x=c.x; p.y=c.y; p.z=c.z+1.2;
   const v=launchVel(); p.vx=v.x; p.vy=v.y; p.vz=v.z; S.phase='fly'; }
-function launchVel(){ // from the muzzle through the reticle (far window center), speed from charge
-  const c=S.cannon, dx=0-c.x, dy=0-c.y, dz=D-(c.z+1.2), n=Math.hypot(dx,dy,dz), sp=120+S.charge*380;
+function launchVel(){ // zeroed on the reticle line far out, so the shot converges with the aim axis at saucer range
+  const c=S.cannon, ZERO=900, dx=0-c.x, dy=0-c.y, dz=ZERO-(c.z+1.2), n=Math.hypot(dx,dy,dz), sp=120+S.charge*380;
   return {x:dx/n*sp, y:dy/n*sp, z:dz/n*sp}; }
 launchBtn.onpointerdown=e=>{e.preventDefault(); startCharge();};
 addEventListener('pointerup',fire); addEventListener('pointercancel',fire);
