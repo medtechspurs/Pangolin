@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v0.6</p>
+  <p style="font-size:13px;opacity:.7">v0.8</p>
   <p>Your phone is a window into a foot-deep box. Tip the phone's top edge toward you to roll things toward the glass. Tip it sideways to steer.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -43,7 +43,7 @@
 </div>
 <script>
 // ---------- world ----------
-const W=6, D=12, H=3;            // box width, depth, height (inches)
+const W=6, D=12; let H=12;       // box width, depth (inches); height follows the screen aspect
 const cv=document.getElementById('c'), ctx=cv.getContext('2d');
 const msg=document.getElementById('msg');
 let tilt={x:0,z:0};             // gravity components on floor plane, -1..1
@@ -65,7 +65,7 @@ S=newState();
 let cw,ch,cx,cy,K;
 function resize(){
   cw=cv.width=cv.clientWidth*devicePixelRatio; ch=cv.height=cv.clientHeight*devicePixelRatio;
-  cx=cw/2; cy=ch/2; K=Math.min(cw/W,ch/H)*.96;
+  cx=cw/2; cy=ch/2; K=cw/W; H=ch/K;   // near face of the box = the screen edges
 }
 window.addEventListener('resize',resize); resize();
 const F=7;                       // focal length in inches
@@ -172,7 +172,7 @@ function update(dt){
 
 // ---------- render ----------
 function line(a,b){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}
-function poly(pts){ ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
+function poly(pts,keep){ if(!keep) ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
 function orient(){
   // world-up vector in device frame from alpha/beta/gamma
   const b=ori.b*Math.PI/180,g=ori.g*Math.PI/180;
@@ -218,22 +218,23 @@ function drawOutside(){
 }
 function drawBox(){
   drawOutside();
-  const h=H/2,w=W/2, z0=3, z1=9;
+  const h=H/2,w=W/2;
   // floor
   ctx.fillStyle='#c9a46e'; poly([P(-w,h,0),P(w,h,0),P(w,h,D),P(-w,h,D)]); ctx.fill();
   // far wall
   ctx.fillStyle='#6b4b33'; poly([P(-w,-h,D),P(w,-h,D),P(w,h,D),P(-w,h,D)]); ctx.fill();
-  // side walls and ceiling with window cutouts (evenodd)
+  // side walls and ceiling: solid wall with a big window hole (evenodd)
+  const wa=W/2-.45, zl=1.2, zr=D-.9, wy0=-h+.6, wy1=h-.9;
   ctx.fillStyle='#4a3527';
-  poly([P(-w,-h,0),P(-w,-h,D),P(-w,h,D),P(-w,h,0)]); poly([P(-w,-1.1,z0),P(-w,-1.1,z1),P(-w,.4,z1),P(-w,.4,z0)]); ctx.fill('evenodd');
-  poly([P(w,-h,0),P(w,-h,D),P(w,h,D),P(w,h,0)]);     poly([P(w,-1.1,z0),P(w,-1.1,z1),P(w,.4,z1),P(w,.4,z0)]);     ctx.fill('evenodd');
+  poly([P(-w,-h,0),P(-w,-h,D),P(-w,h,D),P(-w,h,0)]); poly([P(-w,wy0,zl),P(-w,wy0,zr),P(-w,wy1,zr),P(-w,wy1,zl)],true); ctx.fill('evenodd');
+  poly([P(w,-h,0),P(w,-h,D),P(w,h,D),P(w,h,0)]);     poly([P(w,wy0,zl),P(w,wy0,zr),P(w,wy1,zr),P(w,wy1,zl)],true);     ctx.fill('evenodd');
   ctx.fillStyle='#3b2b21';
-  poly([P(-w,-h,0),P(w,-h,0),P(w,-h,D),P(-w,-h,D)]); poly([P(-2,-h,z0),P(2,-h,z0),P(2,-h,z1),P(-2,-h,z1)]); ctx.fill('evenodd');
+  poly([P(-w,-h,0),P(w,-h,0),P(w,-h,D),P(-w,-h,D)]); poly([P(-wa,-h,zl),P(wa,-h,zl),P(wa,-h,zr),P(-wa,-h,zr)],true); ctx.fill('evenodd');
   // window frames
   ctx.strokeStyle='#2a1d14'; ctx.lineWidth=2*devicePixelRatio;
-  poly([P(-w,-1.1,z0),P(-w,-1.1,z1),P(-w,.4,z1),P(-w,.4,z0)]); ctx.stroke();
-  poly([P(w,-1.1,z0),P(w,-1.1,z1),P(w,.4,z1),P(w,.4,z0)]); ctx.stroke();
-  poly([P(-2,-h,z0),P(2,-h,z0),P(2,-h,z1),P(-2,-h,z1)]); ctx.stroke();
+  poly([P(-w,wy0,zl),P(-w,wy0,zr),P(-w,wy1,zr),P(-w,wy1,zl)]); ctx.stroke();
+  poly([P(w,wy0,zl),P(w,wy0,zr),P(w,wy1,zr),P(w,wy1,zl)]); ctx.stroke();
+  poly([P(-wa,-h,zl),P(wa,-h,zl),P(wa,-h,zr),P(-wa,-h,zr)]); ctx.stroke();
   // floor grid + box edges
   ctx.strokeStyle='rgba(42,29,20,.45)'; ctx.lineWidth=1.5*devicePixelRatio;
   for(let z=0;z<=D;z+=2){ line(P(-w,h,z),P(w,h,z)); }
