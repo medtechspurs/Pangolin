@@ -20,6 +20,7 @@
   #big{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:rgba(42,29,20,.85);text-align:center;padding:24px}
   #big h1{font-size:28px;color:var(--sand)}
   #big p{font-size:15px;max-width:34ch;line-height:1.45}
+  #big .score{font-size:22px;line-height:1.5}
   #big button{flex:0;padding:14px 28px}
 </style>
 </head>
@@ -30,14 +31,15 @@
   <div id="bar">
     <button id="drop">Lay boulder (3)</button>
     <button id="mode">Curl &amp; roll</button>
+    <button id="launch" style="display:none">Launch (hold)</button>
     <button id="reset" style="flex:.6">Reset</button>
   </div>
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v1.8</p>
+  <p style="font-size:13px;opacity:.7">v2.0</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
-  <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
+  <p>Lay boulders, knock out the barriers and robots, then curl up and roll into the cannon. Turn the phone to aim the far window at a saucer, hold Launch to charge, and let go. One shot per level.</p>
   <button id="start">Start (allow tilt)</button>
   <p style="font-size:13px;opacity:.8">On a desktop, use arrow keys or drag.</p>
 </div>
@@ -47,29 +49,33 @@ const W=6, D=12; let H=12;       // box width, depth (inches); height follows th
 const cv=document.getElementById('c'), ctx=cv.getContext('2d');
 const msg=document.getElementById('msg');
 let grav={x:0,y:1,z:0};          // gravity direction in box frame: x right, y down (screen), z into the box
-let acc={x:0,y:0,z:0}, accAt=0;   // inertial force from phone acceleration, box frame, in/s^2
-let base=null;                   // set once orientation events arrive
-let S;
+let acc={x:0,y:0,z:0}, accAt=0;
+let base=null;
+let S, level=1, total=0, kills=0;
 const ball=(x,y,z,r,extra)=>Object.assign({x,y,z,vx:0,vy:0,vz:0,r},extra||{});
-function newState(){
+function rng(seed){ return ()=>{ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function newState(n){
+  const r=rng(n*7919+13), k=n%3;
+  const barriers=[[{z:8.5,hp:1},{z:5,hp:1}],[{z:9,hp:1},{z:6.5,hp:1},{z:4,hp:1}],[{z:7,hp:1}]][k];
+  const robots=[[[-1.6,7],[1.5,3.2]],[[0,7.8],[-1.8,5.2],[1.8,3]],[[-1.2,5.5],[1.2,5.5]]][k].map(([x,z])=>ball(x,0,z,.5,{on:true,rest:.35}));
+  const ufos=[]; const n_u=5+k; for(let i=0;i<n_u;i++) ufos.push({yaw:r()*360, el:8+r()*30, dist:20+r()*130, spd:(r()*10-5), bob:r()*6.28, alive:true});
   return {
     pang:ball(0,0,D-1.2,.45,{rolling:false,alive:true,pinned:true,rest:.5}),
+    cannon:ball(0,0,1.7,.7,{pinned:true}),
     boulders:[], stock:3,
     marbles:[[-1.5,10.5],[1.8,9.6],[.4,6.5],[-2,4],[2.2,2.2]].map(([x,z])=>ball(x,0,z,.22,{rest:.75})),
-    barriers:[{z:8.5,hp:1},{z:5,hp:1}],
-    robots:[ball(-1.6,0,7,.5,{on:true,rest:.35}),ball(1.5,0,3.2,.5,{on:true,rest:.35})],
-    won:false, t:0
+    barriers, robots, ufos,
+    phase:'play', pt:0, corked:false, charge:0, charging:false, shot:null, shotScore:0, shutter:0, t:0
   };
 }
-S=newState();
+S=newState(level);
 
 // ---------- projection ----------
 let cw,ch,cx,cy,K;
 function resize(){
   cw=cv.width=cv.clientWidth*devicePixelRatio; ch=cv.height=cv.clientHeight*devicePixelRatio;
   cx=cw/2; cy=ch/2; K=cw/W; H=ch/K;
-  // spawn heights: bodies start resting on the floor for an upright box
-  const floorY=H/2; for(const b of [...S.marbles,...S.robots,S.pang]) if(b.y===0) b.y=floorY-b.r;
+  const floorY=H/2; for(const b of [...S.marbles,...S.robots,S.pang,S.cannon]) if(b.y===0) b.y=floorY-b.r;
 }
 window.addEventListener('resize',resize); resize();
 const F=7;
@@ -79,18 +85,16 @@ function P(x,y,z){ const s=F/(F+z); return [cx+x*s*K, cy+y*s*K, s]; }
 let ori={a:0,b:90,g:0};
 function onOri(e){ if(e.beta==null) return; base=true; ori={a:e.alpha||0,b:e.beta,g:e.gamma||0}; }
 function onMotion(e){ const a=e.acceleration; if(!a||a.x==null) return;
-  // device accel (m/s^2) -> box frame; objects feel the opposite of the box's acceleration
-  const k=MOTION_GAIN*G/9.81; acc={x:a.x*k, y:-a.y*k, z:-a.z*k};   // same units as sim gravity: 1 g of phone motion = 1 g in the box   // iOS reports acceleration with the sign reversed from the spec
-  accAt=performance.now(); }
+  const k=MOTION_GAIN*G/9.81; acc={x:a.x*k, y:-a.y*k, z:-a.z*k}; accAt=performance.now(); }
 const keys={};
-addEventListener('keydown',e=>{keys[e.key]=1; if(e.key===' ')dropBoulder(); if(e.key==='r')toggleMode();});
-addEventListener('keyup',e=>{keys[e.key]=0});
+addEventListener('keydown',e=>{keys[e.key]=1; if(e.key===' ')dropBoulder(); if(e.key==='r')toggleMode(); if(e.key==='l')startCharge();});
+addEventListener('keyup',e=>{keys[e.key]=0; if(e.key==='l')fire();});
 let drag=null, viewYaw=0, viewPitch=0, kb={x:0,z:0};
-cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY}});
+cv.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,vy:viewYaw,vp:viewPitch}});
 addEventListener('pointerup',()=>{drag=null});
 addEventListener('pointermove',e=>{ if(!drag||base) return;
   kb.x=Math.max(-1,Math.min(1,(e.clientX-drag.x)/120)); kb.z=Math.max(-1,Math.min(1,(e.clientY-drag.y)/120));
-  viewYaw=(e.clientX-drag.x)/6; viewPitch=-(e.clientY-drag.y)/6; });
+  viewYaw=drag.vy+(e.clientX-drag.x)/6; viewPitch=drag.vp-(e.clientY-drag.y)/6; });
 
 document.getElementById('start').onclick=async()=>{
   let status='';
@@ -108,27 +112,31 @@ document.getElementById('start').onclick=async()=>{
 };
 document.getElementById('big').style.display='flex';
 
-const dropBtn=document.getElementById('drop'), modeBtn=document.getElementById('mode');
+const dropBtn=document.getElementById('drop'), modeBtn=document.getElementById('mode'), launchBtn=document.getElementById('launch');
 function dropBoulder(){
-  const p=S.pang; if(p.rolling||S.stock<=0||!p.alive||S.won) return;
+  const p=S.pang; if(p.rolling||S.stock<=0||!p.alive||S.phase!=='play') return;
   S.stock--; S.boulders.push(ball(p.x,p.y,p.z-.9,.4,{rest:.25}));
   dropBtn.textContent=`Lay boulder (${S.stock})`;
 }
 function toggleMode(){
-  const p=S.pang; if(!p.alive||S.won) return;
+  const p=S.pang; if(!p.alive||S.phase!=='play'||S.corked) return;
   p.rolling=!p.rolling; p.pinned=!p.rolling; modeBtn.classList.toggle('on',p.rolling);
   modeBtn.textContent=p.rolling?'Uncurl & walk':'Curl & roll';
 }
+function startCharge(){ if(S.phase!=='play'||!S.corked) return; S.charging=true; S.charge=0; }
+function fire(){ if(!S.charging) return; S.charging=false;
+  const o=orient(); S.shot={yaw:o.yaw, pitch:o.pitch, v:40+S.charge*130, t:0, d:0, h:2, dist:0, el:0};
+  S.phase='fly'; S.pt=0; S.shotScore=0; launchBtn.style.display='none'; say(''); }
+launchBtn.onpointerdown=e=>{e.preventDefault(); startCharge();};
+addEventListener('pointerup',fire); addEventListener('pointercancel',fire);
 dropBtn.onclick=dropBoulder; modeBtn.onclick=toggleMode;
-document.getElementById('reset').onclick=()=>{S=newState(); resize(); sm=null; dropBtn.textContent='Lay boulder (3)'; modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); say('');};
+function uiReset(){ dropBtn.textContent=`Lay boulder (${S.stock})`; modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); launchBtn.style.display='none'; say(''); }
+document.getElementById('reset').onclick=()=>{S=newState(level); resize(); sm=null; uiReset();};
 function say(t){msg.textContent=t}
 
 // ---------- orientation ----------
 let sm=null;
-function upVec(){ // world-up in device frame (x right, y up, z out of screen)
-  const b=ori.b*Math.PI/180,g=ori.g*Math.PI/180;
-  return [-Math.cos(b)*Math.sin(g), Math.sin(b), Math.cos(b)*Math.cos(g)];
-}
+function upVec(){ const b=ori.b*Math.PI/180,g=ori.g*Math.PI/180; return [-Math.cos(b)*Math.sin(g), Math.sin(b), Math.cos(b)*Math.cos(g)]; }
 function orient(){
   if(!base) return {yaw:viewYaw, pitch:viewPitch, roll:0};
   const a=ori.a*Math.PI/180,b=ori.b*Math.PI/180,g=ori.g*Math.PI/180;
@@ -142,18 +150,18 @@ function orient(){
   sm.yaw=((sm.yaw+dy*k+540)%360)-180; sm.pitch+=(pitch-sm.pitch)*k; sm.roll+=(roll-sm.roll)*k;
   return sm;
 }
+const wrap=d=>((d+180)%360+360)%360-180;
 
 // ---------- physics ----------
-const G=62, FRIC=.996, MOTION_GAIN=1.8, LIFT_GAIN=2.0;   // motion counts for more than it reads; extra when the floor drops away
+const G=62, FRIC=.996, MOTION_GAIN=1.8, LIFT_GAIN=2.0;
 function stepBody(b,dt){
   if(b.pinned) return;
-  let f=(performance.now()-accAt<150)?acc:{x:0,y:0,z:0};   // ignore stale sensor data
-  if(f.x*grav.x+f.y*grav.y+f.z*grav.z<0) f={x:f.x*LIFT_GAIN,y:f.y*LIFT_GAIN,z:f.z*LIFT_GAIN};   // box moving down relative to gravity
+  let f=(performance.now()-accAt<150)?acc:{x:0,y:0,z:0};
+  if(f.x*grav.x+f.y*grav.y+f.z*grav.z<0) f={x:f.x*LIFT_GAIN,y:f.y*LIFT_GAIN,z:f.z*LIFT_GAIN};
   b.vx+=(grav.x*G+f.x)*dt; b.vy+=(grav.y*G+f.y)*dt; b.vz+=(grav.z*G+f.z)*dt;
   b.vx*=FRIC; b.vy*=FRIC; b.vz*=FRIC;
   b.x+=b.vx*dt; b.y+=b.vy*dt; b.z+=b.vz*dt;
-  const lx=W/2-b.r, ly=H/2-b.r;
-  const R=b.rest??.45;
+  const lx=W/2-b.r, ly=H/2-b.r, R=b.rest??.45;
   if(b.x<-lx){b.x=-lx;b.vx*=-R} if(b.x>lx){b.x=lx;b.vx*=-R}
   if(b.y<-ly){b.y=-ly;b.vy*=-R} if(b.y>ly){b.y=ly;b.vy*=-R}
   if(b.z<b.r){b.z=b.r;b.vz*=-R} if(b.z>D-b.r){b.z=D-b.r;b.vz*=-R}
@@ -165,31 +173,69 @@ function collide(a,b){
   const wa=a.pinned?0:1, wb=b.pinned?0:1, tot=wa+wb||1, o=(m-d);
   a.x-=nx*o*wa/tot;a.y-=ny*o*wa/tot;a.z-=nz*o*wa/tot; b.x+=nx*o*wb/tot;b.y+=ny*o*wb/tot;b.z+=nz*o*wb/tot;
   const p=(a.vx-b.vx)*nx+(a.vy-b.vy)*ny+(a.vz-b.vz)*nz; if(p<0) return true;
-  if(!a.pinned){a.vx-=p*nx*wb/tot*2*.7;a.vy-=p*ny*wb/tot*2*.7;a.vz-=p*nz*wb/tot*2*.7;}
-  if(!b.pinned){b.vx+=p*nx*wa/tot*2*.7;b.vy+=p*ny*wa/tot*2*.7;b.vz+=p*nz*wa/tot*2*.7;}
+  if(!a.pinned){a.vx-=p*nx*wb/tot*1.4;a.vy-=p*ny*wb/tot*1.4;a.vz-=p*nz*wb/tot*1.4;}
+  if(!b.pinned){b.vx+=p*nx*wa/tot*1.4;b.vy+=p*ny*wa/tot*1.4;b.vz+=p*nz*wa/tot*1.4;}
   return true;
 }
 function wallHit(b){ for(const w of S.barriers){ if(w.hp<=0) continue;
   if(b.z<w.z+.3+b.r && b.z>w.z-.3-b.r){ if(b.smash && Math.abs(b.vz)>3){ w.hp=0; b.vz*=.35; say('Barrier smashed'); }
     else { b.z=b.vz<0? w.z+.3+b.r : w.z-.3-b.r; b.vz*=-.4; } } } }
+function depositPang(){ const p=S.pang; p.x=0; p.z=D-1.2; p.y=H/2-p.r; p.vx=p.vy=p.vz=0; p.rolling=false; p.pinned=true; p.alive=true; S.corked=false;
+  modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); }
 function update(dt){
-  if(S.won) return; S.t+=dt;
+  S.t+=dt; S.pt+=dt;
   if(base){ const [ux,uy,uz]=upVec(); grav={x:-ux,y:uy,z:uz}; }
   else { kb.x=(keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0)||kb.x; kb.z=(keys.ArrowDown?1:0)-(keys.ArrowUp?1:0)||kb.z;
          const n=Math.hypot(kb.x,1,kb.z); grav={x:kb.x/n,y:1/n,z:kb.z/n}; if(!drag&&!Object.values(keys).some(v=>v)) kb={x:0,z:0}; }
+  for(const u of S.ufos){ u.yaw+=u.spd*dt; u.bob+=dt; }
   const p=S.pang;
+  // box physics runs in every phase so the world stays alive
   for(const b of S.boulders){ b.smash=true; stepBody(b,dt); wallHit(b); }
   for(const m of S.marbles){ stepBody(m,dt); wallHit(m); }
   for(const r of S.robots){ stepBody(r,dt); wallHit(r); }
-  if(p.alive){ stepBody(p,dt); if(p.rolling) wallHit(p); }
-  const all=[...S.boulders,...S.marbles,...S.robots,p];
+  if(p.alive&&!S.corked&&S.phase==='play'){ stepBody(p,dt); if(p.rolling) wallHit(p); }
+  const all=[...S.boulders,...S.marbles,...S.robots,S.cannon]; if(S.phase==='play'&&!S.corked) all.push(p);
   for(let i=0;i<all.length;i++) for(let j=i+1;j<all.length;j++){
     const a=all[i],b=all[j]; if(!collide(a,b)) continue;
     const bo=a.smash?a:(b.smash?b:null), ro=a.on!==undefined?a:(b.on!==undefined?b:null);
     if(bo&&ro&&ro.on){ ro.on=false; say('Robot decommissioned'); }
     if((a===p||b===p)&&ro&&ro.on&&p.rolling&&p.alive){ p.alive=false; p.pinned=true; say('Caught! Tap reset'); }
   }
-  if(p.alive&&p.rolling&&p.z<.7){ S.won=true; say('Pangolin made it home'); }
+  if(S.phase==='play'){
+    // roll into the cannon mouth (faces the far wall) to cork it
+    const c=S.cannon;
+    if(p.alive&&p.rolling&&!S.corked&&p.vz<0&&Math.abs(p.x-c.x)<.75&&Math.abs(p.y-c.y)<.75&&p.z>c.z+.5&&p.z<c.z+1.9){
+      S.corked=true; p.pinned=true; p.x=c.x; p.y=c.y; p.z=c.z+.9; p.vx=p.vy=p.vz=0;
+      launchBtn.style.display='block'; say('Corked. Turn to aim, hold Launch to charge');
+    }
+    if(S.charging) S.charge=Math.min(1,S.charge+dt*.8);
+  } else if(S.phase==='fly'){
+    const sh=S.shot; sh.t+=dt; const pr=sh.pitch*Math.PI/180;
+    sh.d=sh.v*Math.cos(pr)*sh.t; sh.h=2+sh.v*Math.sin(pr)*sh.t-.5*30*sh.t*sh.t;
+    sh.dist=Math.hypot(sh.d,sh.h); sh.el=Math.atan2(sh.h,sh.d)*180/Math.PI;
+    for(const u of S.ufos){ if(!u.alive) continue; const uel=u.el+Math.sin(u.bob)*1.5, ang=3.2*30/u.dist;   // saucer angular radius
+      if(Math.abs(sh.dist-u.dist)<8 && Math.abs(wrap(sh.yaw-u.yaw))<ang*1.2 && Math.abs(sh.el-uel)<ang*1.2){
+        u.alive=false; kills++; S.shotScore=Math.round(u.dist)*10; total+=S.shotScore; say(`Hit! +${S.shotScore}`); S.phase='reel'; S.pt=0; break; } }
+    if(S.phase==='fly'&&(sh.h<-6||sh.t>4.5||sh.dist>260)){ S.phase='reel'; S.pt=0; if(!S.shotScore) say('Missed'); }
+  } else if(S.phase==='reel'){
+    const sh=S.shot, o=orient(), k=Math.min(1,dt*2.2);
+    sh.dist+=(0-sh.dist)*k; sh.yaw+=wrap(o.yaw-sh.yaw)*k; sh.el+=(o.pitch-sh.el)*k;
+    if(sh.dist<1.5||S.pt>2.5){ S.phase='retract'; S.pt=0; depositPang(); }
+  } else if(S.phase==='retract'){
+    if(S.pt>.7){ S.phase='score'; S.pt=0; showScore(); }
+  } else if(S.phase==='score'){
+    if(S.pt>3){ S.phase='shut'; S.pt=0; document.getElementById('big').style.display='none'; }
+  } else if(S.phase==='shut'){
+    S.shutter=Math.min(1,S.pt/.9);
+    if(S.pt>1.6){ level++; S=newState(level); resize(); S.phase='open'; S.shutter=1; uiReset(); }
+  } else if(S.phase==='open'){
+    S.shutter=Math.max(0,1-S.pt/.9); if(S.pt>.9){ S.phase='play'; S.shutter=0; }
+  }
+}
+function showScore(){
+  const left=S.ufos.filter(u=>u.alive).length, big=document.getElementById('big');
+  big.innerHTML=`<h1>${S.shotScore?'Saucer down':'Clean miss'}</h1><p class="score">Shot: ${S.shotScore}<br>Total: ${total}<br>Saucers defeated: ${kills}<br>Saucers left in this world: ${left} of ${S.ufos.length}</p><p style="font-size:13px;opacity:.8">Next level in a moment</p>`;
+  big.style.display='flex';
 }
 
 // ---------- render ----------
@@ -197,6 +243,11 @@ function line(a,b){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);c
 function poly(pts,keep){ if(!keep) ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
 function hill(deg){ return 14*Math.abs(Math.sin(deg*.05+1))+6*Math.sin(deg*.13)+4*Math.sin(deg*.31); }
 const clouds=[]; for(let i=0;i<24;i++) clouds.push({yaw:i*15+(i*37%11), el:12+(i*53%20), s:.05+((i*17)%5)*.012});
+function drawUfo(x,y,r,alive){
+  ctx.fillStyle=alive?'#b9c4cf':'#5a5f66'; ctx.beginPath(); ctx.ellipse(x,y,r,r*.32,0,0,7); ctx.fill();
+  ctx.fillStyle=alive?'#e8f4ff':'#7a8088'; ctx.beginPath(); ctx.ellipse(x,y-r*.22,r*.45,r*.3,0,Math.PI,0); ctx.fill();
+  if(alive){ ctx.fillStyle='#ffdd57'; for(let i=-2;i<=2;i++){ ctx.beginPath(); ctx.arc(x+i*r*.35,y+r*.1,Math.max(1,r*.06),0,7); ctx.fill(); } }
+}
 function drawOutside(){
   const o=orient(), ppd=cw/60, big=Math.hypot(cw,ch)*1.2;
   ctx.save(); ctx.translate(cx,cy); ctx.rotate(o.roll);
@@ -205,13 +256,14 @@ function drawOutside(){
   ctx.fillStyle=sky; ctx.fillRect(-big,-big,2*big,big+hy);
   const gnd=ctx.createLinearGradient(0,hy,0,hy+60*ppd); gnd.addColorStop(0,'#9dbb63'); gnd.addColorStop(1,'#4f7233');
   ctx.fillStyle=gnd; ctx.fillRect(-big,hy,2*big,big-hy);
-  const wrap=d=>((d+180)%360+360)%360-180;
   const sxx=wrap(140-o.yaw)*ppd, syy=hy-45*ppd;
   ctx.fillStyle='rgba(255,243,176,.35)'; ctx.beginPath(); ctx.arc(sxx,syy,cw*.11,0,7); ctx.fill();
   ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(sxx,syy,cw*.05,0,7); ctx.fill();
   ctx.fillStyle='rgba(255,255,255,.9)';
   for(const c of clouds){ const x=wrap(c.yaw-o.yaw)*ppd, y=hy-c.el*ppd, r=cw*c.s;
     if(Math.abs(x)>big) continue; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.arc(x+r*.9,y+r*.2,r*.8,0,7); ctx.arc(x-r*.9,y+r*.25,r*.7,0,7); ctx.fill(); }
+  // saucers, far ones first
+  for(const u of [...S.ufos].sort((a,b)=>b.dist-a.dist)){ const x=wrap(u.yaw-o.yaw)*ppd, y=hy-(u.el+Math.sin(u.bob)*1.5)*ppd; if(Math.abs(x)>big) continue; drawUfo(x,y,cw*3.2/u.dist,u.alive); }
   ctx.fillStyle='#6f8f4a'; ctx.beginPath(); ctx.moveTo(-big,hy+2);
   for(let x=-big;x<=big;x+=cw/40){ ctx.lineTo(x, hy-hill(o.yaw+x/ppd)*ppd*.35); }
   ctx.lineTo(big,hy+2); ctx.fill();
@@ -224,28 +276,31 @@ function drawOutside(){
       ctx.fillStyle=(k%5===0)?'#f2d13b':(k%7===0)?'#e9eef4':'#3f6b2b';
       if(k%5===0||k%7===0){ ctx.beginPath(); ctx.arc(xx,y,sc*cw*.006+1,0,7); ctx.fill(); }
       else { ctx.fillRect(xx,y-sc*cw*.02,Math.max(1,sc*cw*.004),sc*cw*.02); } } }
+  // pangolin in flight, on its thread
+  if((S.phase==='fly'||S.phase==='reel')&&S.shot){ const sh=S.shot, x=wrap(sh.yaw-o.yaw)*ppd, y=hy-sh.el*ppd, r=Math.max(3,cw*2.2/(sh.dist+2));
+    ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1,2*devicePixelRatio*(1-Math.min(1,sh.dist/200))); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(x,y); ctx.stroke();
+    ctx.save(); ctx.translate(x,y); ctx.rotate(sh.t*9); drawPangBall(r,1); ctx.restore(); }
   ctx.restore();
 }
 function drawBox(){
   drawOutside();
   const h=H/2,w=W/2, zl=1.2, zr=D-.9, ix=w-.5, iy=h-.6, fi=.5;
   const walls=[
-    {c:'#c9a46e', outer:[P(-w,h,0),P(w,h,0),P(w,h,D),P(-w,h,D)],   hole:[P(-ix,h,zl),P(ix,h,zl),P(ix,h,zr),P(-ix,h,zr)]},        // floor
-    {c:'#3b2b21', outer:[P(-w,-h,0),P(w,-h,0),P(w,-h,D),P(-w,-h,D)], hole:[P(-ix,-h,zl),P(ix,-h,zl),P(ix,-h,zr),P(-ix,-h,zr)]},    // ceiling
-    {c:'#4a3527', outer:[P(-w,-h,0),P(-w,-h,D),P(-w,h,D),P(-w,h,0)], hole:[P(-w,-iy,zl),P(-w,-iy,zr),P(-w,iy,zr),P(-w,iy,zl)]},    // left
-    {c:'#4a3527', outer:[P(w,-h,0),P(w,-h,D),P(w,h,D),P(w,h,0)],     hole:[P(w,-iy,zl),P(w,-iy,zr),P(w,iy,zr),P(w,iy,zl)]},        // right
-    {c:'#6b4b33', outer:[P(-w,-h,D),P(w,-h,D),P(w,h,D),P(-w,h,D)],   hole:[P(-w+fi,-h+fi,D),P(w-fi,-h+fi,D),P(w-fi,h-fi,D),P(-w+fi,h-fi,D)]} // far
+    {c:'#c9a46e', outer:[P(-w,h,0),P(w,h,0),P(w,h,D),P(-w,h,D)],   hole:[P(-ix,h,zl),P(ix,h,zl),P(ix,h,zr),P(-ix,h,zr)]},
+    {c:'#3b2b21', outer:[P(-w,-h,0),P(w,-h,0),P(w,-h,D),P(-w,-h,D)], hole:[P(-ix,-h,zl),P(ix,-h,zl),P(ix,-h,zr),P(-ix,-h,zr)]},
+    {c:'#4a3527', outer:[P(-w,-h,0),P(-w,-h,D),P(-w,h,D),P(-w,h,0)], hole:[P(-w,-iy,zl),P(-w,-iy,zr),P(-w,iy,zr),P(-w,iy,zl)]},
+    {c:'#4a3527', outer:[P(w,-h,0),P(w,-h,D),P(w,h,D),P(w,h,0)],     hole:[P(w,-iy,zl),P(w,-iy,zr),P(w,iy,zr),P(w,iy,zl)]},
+    {c:'#6b4b33', outer:[P(-w,-h,D),P(w,-h,D),P(w,h,D),P(-w,h,D)],   hole:[P(-w+fi,-h+fi,D),P(w-fi,-h+fi,D),P(w-fi,h-fi,D),P(-w+fi,h-fi,D)]}
   ];
   for(const wl of walls){ ctx.fillStyle=wl.c; poly(wl.outer); poly(wl.hole,true); ctx.fill('evenodd'); }
   ctx.strokeStyle='#2a1d14'; ctx.lineWidth=2*devicePixelRatio;
   for(const wl of walls){ poly(wl.hole); ctx.stroke(); }
   ctx.lineWidth=3*devicePixelRatio;
   for(const [x,y] of [[-w,-h],[w,-h],[w,h],[-w,h]]) line(P(x,y,0),P(x,y,D));
-  // glass hint at the open end: faint depth marks along the floor and ceiling edges
   ctx.strokeStyle='rgba(42,29,20,.35)'; ctx.lineWidth=1.5*devicePixelRatio;
   for(let z=0;z<=zl;z+=.6){ line(P(-w,h,z),P(w,h,z)); line(P(-w,-h,z),P(w,-h,z)); }
 }
-function shadow(b){ // drop a shadow onto whichever wall lies along gravity
+function shadow(b){
   let t=1e9; const g=grav;
   if(g.x>0) t=Math.min(t,(W/2-b.x)/g.x); if(g.x<0) t=Math.min(t,(-W/2-b.x)/g.x);
   if(g.y>0) t=Math.min(t,(H/2-b.y)/g.y); if(g.y<0) t=Math.min(t,(-H/2-b.y)/g.y);
@@ -265,12 +320,20 @@ function drawRobot(r){ shadow(r); const [sx,sy,s]=P(r.x,r.y,r.z), R=r.r*s*K;
   ctx.fillStyle=r.on?'#8d949c':'#5d6166'; ctx.fillRect(sx-R,sy-R,2*R,2*R);
   ctx.fillStyle=r.on?'#d8262c':'#6f8f4a'; ctx.beginPath(); ctx.arc(sx,sy-R*.2,R*.28,0,7); ctx.fill();
   if(r.on){ ctx.strokeStyle='#8d949c'; ctx.lineWidth=R*.25; line([sx-R,sy+R*.2],[sx-R*1.6,sy+R*.6]); line([sx+R,sy+R*.2],[sx+R*1.6,sy+R*.6]); } }
-function drawPang(p){ shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
+function drawCannon(){ const c=S.cannon, z0=c.z-.7, z1=c.z+.9, r=.62;
+  const a=P(c.x,c.y,z0), b=P(c.x,c.y,z1), ra=r*a[2]*K, rb=r*b[2]*K;
+  ctx.fillStyle='#4b4f55'; ctx.beginPath(); ctx.moveTo(a[0]-ra,a[1]); ctx.lineTo(b[0]-rb,b[1]); ctx.lineTo(b[0]+rb,b[1]); ctx.lineTo(a[0]+ra,a[1]); ctx.fill();
+  ctx.fillStyle='#2b2e33'; ctx.beginPath(); ctx.arc(b[0],b[1],rb,0,7); ctx.fill();          // muzzle (faces the far wall)
+  ctx.strokeStyle='#7c8189'; ctx.lineWidth=rb*.12; ctx.stroke();
+  ctx.fillStyle='#5d626a'; ctx.beginPath(); ctx.arc(a[0],a[1],ra,0,7); ctx.fill();          // breech cap toward the glass
+  ctx.fillStyle='#8a8f97'; ctx.beginPath(); ctx.arc(a[0]-ra*.3,a[1]-ra*.3,ra*.25,0,7); ctx.fill();
+  if(S.corked){ const m=P(c.x,c.y,z1+.15); ctx.save(); ctx.translate(m[0],m[1]); drawPangBall(.45*m[2]*K,1); ctx.restore(); } }
+function drawPangBall(R,alpha){ ctx.globalAlpha=alpha; ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fill();
+  ctx.strokeStyle='#6d4318'; ctx.lineWidth=Math.max(1,R*.12); for(let i=0;i<4;i++){ ctx.beginPath(); ctx.arc(0,0,R*(.35+i*.2),i*.7,i*.7+2.4); ctx.stroke(); } ctx.globalAlpha=1; }
+function drawPang(p){ if(S.corked||S.phase==='fly'||S.phase==='reel') return; shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
   ctx.save(); ctx.translate(sx,sy); if(!p.alive) ctx.globalAlpha=.5;
-  if(p.rolling){ ctx.rotate((p.z+p.x)*3); ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fill();
-    ctx.strokeStyle='#6d4318'; ctx.lineWidth=Math.max(1,R*.12);
-    for(let i=0;i<4;i++){ ctx.beginPath(); ctx.arc(0,0,R*(.35+i*.2),i*.7,i*.7+2.4); ctx.stroke(); } }
-  else { ctx.rotate(Math.atan2(grav.x,grav.y)*-1); // stand on whatever is down
+  if(p.rolling){ ctx.rotate((p.z+p.x)*3); drawPangBall(R,p.alive?1:.5); }
+  else { ctx.rotate(Math.atan2(grav.x,grav.y)*-1);
     ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.ellipse(0,R*.1,R*1.3,R*.8,0,0,7); ctx.fill();
     ctx.strokeStyle='#6d4318'; ctx.lineWidth=Math.max(1,R*.12);
     for(let i=-2;i<=2;i++){ ctx.beginPath(); ctx.arc(i*R*.45,R*.1,R*.5,Math.PI*1.15,Math.PI*1.85); ctx.stroke(); }
@@ -278,9 +341,28 @@ function drawPang(p){ shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
     ctx.fillStyle='#2a1d14'; ctx.beginPath(); ctx.arc(-R*1.5,R*.15,R*.08,0,7); ctx.fill();
     ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.moveTo(R*1.1,0); ctx.lineTo(R*2.1,R*.3); ctx.lineTo(R*1.1,R*.5); ctx.fill(); }
   ctx.restore(); }
+function drawReticle(){ if(!S.corked||S.phase!=='play') return; const r=cw*.06;
+  ctx.strokeStyle='rgba(255,60,60,.9)'; ctx.lineWidth=2*devicePixelRatio;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
+  for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) line([cx+dx*r*.5,cy+dy*r*.5],[cx+dx*r*1.5,cy+dy*r*1.5]);
+  if(S.charging||S.charge>0){ ctx.strokeStyle='#ffdd57'; ctx.lineWidth=5*devicePixelRatio; ctx.beginPath(); ctx.arc(cx,cy,r*1.9,-Math.PI/2,-Math.PI/2+S.charge*Math.PI*2); ctx.stroke(); } }
+function drawThreadRetract(){ if(S.phase!=='retract') return; const c=S.cannon, m=P(c.x,c.y,c.z+.9), far=[cx,cy], k=1-Math.min(1,S.pt/.6);
+  ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,[m[0]+(far[0]-m[0])*k,m[1]+(far[1]-m[1])*k]); }
+function drawThreadInBox(){ if(S.phase!=='fly'&&S.phase!=='reel') return; const c=S.cannon, m=P(c.x,c.y,c.z+.9);
+  ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,[cx,cy]); }
+function drawHud(){ const left=S.ufos.filter(u=>u.alive).length, s=13*devicePixelRatio;
+  ctx.font=`bold ${s}px Trebuchet MS, sans-serif`; ctx.fillStyle='#e6c58f'; ctx.textAlign='left';
+  ctx.shadowColor='#000'; ctx.shadowBlur=3*devicePixelRatio;
+  ctx.fillText(`Level ${level}   ${total} pts   saucers ${left}/${S.ufos.length}`,12*devicePixelRatio,ch-10*devicePixelRatio); ctx.shadowBlur=0; }
 function drawTilt(){ const r=22*devicePixelRatio, x=cw-r-14*devicePixelRatio, y=r+14*devicePixelRatio;
   ctx.strokeStyle='rgba(230,197,143,.6)'; ctx.lineWidth=2*devicePixelRatio; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.stroke();
   ctx.fillStyle='#e6c58f'; ctx.beginPath(); ctx.arc(x+grav.x*r*.8,y+grav.y*r*.8,(4+grav.z*3)*devicePixelRatio,0,7); ctx.fill(); }
+function drawShutter(){ if(S.shutter<=0) return; const wdt=cw/2*S.shutter;
+  const g=ctx.createLinearGradient(0,0,cw,0); g.addColorStop(0,'#5c626b'); g.addColorStop(.5,'#9aa1aa'); g.addColorStop(1,'#5c626b');
+  ctx.fillStyle=g; ctx.fillRect(0,0,wdt,ch); ctx.fillRect(cw-wdt,0,wdt,ch);
+  ctx.fillStyle='#3a3f46'; for(let y=ch*.05;y<ch;y+=ch*.1){ ctx.beginPath(); ctx.arc(wdt-12*devicePixelRatio,y,4*devicePixelRatio,0,7); ctx.arc(cw-wdt+12*devicePixelRatio,y,4*devicePixelRatio,0,7); ctx.fill(); }
+  if(S.shutter>.95){ ctx.fillStyle='#d8262c'; ctx.font=`bold ${28*devicePixelRatio}px Trebuchet MS, sans-serif`; ctx.textAlign='center';
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(-.18); ctx.strokeStyle='#d8262c'; ctx.lineWidth=3*devicePixelRatio; ctx.strokeRect(-cw*.3,-ch*.05,cw*.6,ch*.1); ctx.fillText('TOP SECRET',0,ch*.032); ctx.restore(); } }
 function render(){
   drawBox();
   const items=[];
@@ -289,8 +371,9 @@ function render(){
   for(const b of S.boulders) items.push({z:b.z,f:()=>drawBoulder(b)});
   for(const m of S.marbles) items.push({z:m.z,f:()=>drawMarble(m)});
   items.push({z:S.pang.z,f:()=>drawPang(S.pang)});
+  items.push({z:S.cannon.z,f:()=>drawCannon()});
   items.sort((a,b)=>b.z-a.z).forEach(i=>i.f());
-  drawTilt();
+  drawThreadInBox(); drawThreadRetract(); drawReticle(); drawHud(); drawTilt(); drawShutter();
 }
 let last=performance.now();
 function loop(now){ const dt=Math.min(.033,(now-last)/1000); last=now; try{ update(dt); render(); }catch(e){ say('Error: '+e.message); } requestAnimationFrame(loop); }
