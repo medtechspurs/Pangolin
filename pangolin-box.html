@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v0.5</p>
+  <p style="font-size:13px;opacity:.7">v0.6</p>
   <p>Your phone is a window into a foot-deep box. Tip the phone's top edge toward you to roll things toward the glass. Tip it sideways to steer.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -185,7 +185,7 @@ const clouds=[]; for(let i=0;i<24;i++) clouds.push({yaw:i*15+(i*37%11), el:12+(i
 function drawOutside(){
   const o=orient(), ppd=cw/60, big=Math.hypot(cw,ch)*1.2;
   ctx.save(); ctx.translate(cx,cy); ctx.rotate(o.roll);
-  const hy=o.pitch*ppd;                      // horizon y (looking up moves horizon down)
+  const hy=-o.pitch*ppd;                     // horizon y (looking up moves horizon down)
   const sky=ctx.createLinearGradient(0,hy-90*ppd,0,hy); sky.addColorStop(0,'#3d86c6'); sky.addColorStop(.7,'#8fc3e8'); sky.addColorStop(1,'#e2eef6');
   ctx.fillStyle=sky; ctx.fillRect(-big,-big,2*big,big+hy);
   const gnd=ctx.createLinearGradient(0,hy,0,hy+60*ppd); gnd.addColorStop(0,'#9dbb63'); gnd.addColorStop(1,'#4f7233');
