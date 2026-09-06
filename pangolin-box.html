@@ -37,7 +37,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v2.0</p>
+  <p style="font-size:13px;opacity:.7">v2.1</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll into the cannon. Turn the phone to aim the far window at a saucer, hold Launch to charge, and let go. One shot per level.</p>
   <button id="start">Start (allow tilt)</button>
@@ -58,7 +58,7 @@ function newState(n){
   const r=rng(n*7919+13), k=n%3;
   const barriers=[[{z:8.5,hp:1},{z:5,hp:1}],[{z:9,hp:1},{z:6.5,hp:1},{z:4,hp:1}],[{z:7,hp:1}]][k];
   const robots=[[[-1.6,7],[1.5,3.2]],[[0,7.8],[-1.8,5.2],[1.8,3]],[[-1.2,5.5],[1.2,5.5]]][k].map(([x,z])=>ball(x,0,z,.5,{on:true,rest:.35}));
-  const ufos=[]; const n_u=5+k; for(let i=0;i<n_u;i++) ufos.push({yaw:r()*360, el:8+r()*30, dist:20+r()*130, spd:(r()*10-5), bob:r()*6.28, alive:true});
+  const ufos=[]; const n_u=5+k; for(let i=0;i<n_u;i++) ufos.push({yaw:r()*360, el:8+r()*30, dist:250+r()*1400, spd:(r()*10-5), bob:r()*6.28, alive:true});
   return {
     pang:ball(0,0,D-1.2,.45,{rolling:false,alive:true,pinned:true,rest:.5}),
     cannon:ball(0,0,1.7,.7,{pinned:true}),
@@ -125,8 +125,10 @@ function toggleMode(){
 }
 function startCharge(){ if(S.phase!=='play'||!S.corked) return; S.charging=true; S.charge=0; }
 function fire(){ if(!S.charging) return; S.charging=false;
-  const o=orient(); S.shot={yaw:o.yaw, pitch:o.pitch, v:40+S.charge*130, t:0, d:0, h:2, dist:0, el:0};
-  S.phase='fly'; S.pt=0; S.shotScore=0; launchBtn.style.display='none'; say(''); }
+  S.phase='fuse'; S.pt=0; S.shotScore=0; launchBtn.style.display='none'; say(''); }
+function launchNow(){ const c=S.cannon, p=S.pang;
+  S.shot={t:0}; S.corked=false; p.pinned=false; p.rolling=true; p.x=c.x; p.y=c.y; p.z=c.z+1.2;
+  p.vx=0; p.vy=0; p.vz=120+S.charge*380; S.phase='fly'; }
 launchBtn.onpointerdown=e=>{e.preventDefault(); startCharge();};
 addEventListener('pointerup',fire); addEventListener('pointercancel',fire);
 dropBtn.onclick=dropBoulder; modeBtn.onclick=toggleMode;
@@ -151,6 +153,9 @@ function orient(){
   return sm;
 }
 const wrap=d=>((d+180)%360+360)%360-180;
+function ufoBox(u,o){ // saucer position in the box's frame for the current orientation
+  const dy=wrap(u.yaw-o.yaw)*Math.PI/180, de=(u.el+Math.sin(u.bob)*1.5-o.pitch)*Math.PI/180;
+  return {x:u.dist*Math.sin(dy)*Math.cos(de), y:-u.dist*Math.sin(de), z:u.dist*Math.cos(dy)*Math.cos(de), r:14+u.dist*.045}; }
 
 // ---------- physics ----------
 const G=62, FRIC=.996, MOTION_GAIN=1.8, LIFT_GAIN=2.0;
@@ -209,18 +214,22 @@ function update(dt){
       launchBtn.style.display='block'; say('Corked. Turn to aim, hold Launch to charge');
     }
     if(S.charging) S.charge=Math.min(1,S.charge+dt*.8);
+  } else if(S.phase==='fuse'){
+    if(S.pt>1.3) launchNow();
   } else if(S.phase==='fly'){
-    const sh=S.shot; sh.t+=dt; const pr=sh.pitch*Math.PI/180;
-    sh.d=sh.v*Math.cos(pr)*sh.t; sh.h=2+sh.v*Math.sin(pr)*sh.t-.5*30*sh.t*sh.t;
-    sh.dist=Math.hypot(sh.d,sh.h); sh.el=Math.atan2(sh.h,sh.d)*180/Math.PI;
-    for(const u of S.ufos){ if(!u.alive) continue; const uel=u.el+Math.sin(u.bob)*1.5, ang=3.2*30/u.dist;   // saucer angular radius
-      if(Math.abs(sh.dist-u.dist)<8 && Math.abs(wrap(sh.yaw-u.yaw))<ang*1.2 && Math.abs(sh.el-uel)<ang*1.2){
-        u.alive=false; kills++; S.shotScore=Math.round(u.dist)*10; total+=S.shotScore; say(`Hit! +${S.shotScore}`); S.phase='reel'; S.pt=0; break; } }
-    if(S.phase==='fly'&&(sh.h<-6||sh.t>4.5||sh.dist>260)){ S.phase='reel'; S.pt=0; if(!S.shotScore) say('Missed'); }
+    const sh=S.shot; sh.t+=dt;
+    // free flight in the box frame: real gravity, no walls once past the far window
+    p.vx+=grav.x*G*dt; p.vy+=grav.y*G*dt; p.vz+=grav.z*G*dt;
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+    const o=orient();
+    for(const u of S.ufos){ if(!u.alive) continue; const b=ufoBox(u,o);
+      if(Math.hypot(p.x-b.x,p.y-b.y,p.z-b.z)<b.r+p.r+6){ u.alive=false; kills++; S.shotScore=Math.round(u.dist/10)*10; total+=S.shotScore; say(`Hit! +${S.shotScore}`); S.phase='reel'; S.pt=0; break; } }
+    const far=Math.hypot(p.x,p.y,p.z);
+    if(S.phase==='fly'&&(sh.t>5||far>2200||(p.z>D&&p.y>1200))){ S.phase='reel'; S.pt=0; if(!S.shotScore) say('Missed'); }
   } else if(S.phase==='reel'){
-    const sh=S.shot, o=orient(), k=Math.min(1,dt*2.2);
-    sh.dist+=(0-sh.dist)*k; sh.yaw+=wrap(o.yaw-sh.yaw)*k; sh.el+=(o.pitch-sh.el)*k;
-    if(sh.dist<1.5||S.pt>2.5){ S.phase='retract'; S.pt=0; depositPang(); }
+    const tx=0, ty=H/2-p.r, tz=D-.7, k=Math.min(1,dt*2.5);
+    p.x+=(tx-p.x)*k; p.y+=(ty-p.y)*k; p.z+=(tz-p.z)*k;
+    if(Math.hypot(p.x-tx,p.y-ty,p.z-tz)<.3||S.pt>3){ S.phase='retract'; S.pt=0; depositPang(); }
   } else if(S.phase==='retract'){
     if(S.pt>.7){ S.phase='score'; S.pt=0; showScore(); }
   } else if(S.phase==='score'){
@@ -262,8 +271,6 @@ function drawOutside(){
   ctx.fillStyle='rgba(255,255,255,.9)';
   for(const c of clouds){ const x=wrap(c.yaw-o.yaw)*ppd, y=hy-c.el*ppd, r=cw*c.s;
     if(Math.abs(x)>big) continue; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.arc(x+r*.9,y+r*.2,r*.8,0,7); ctx.arc(x-r*.9,y+r*.25,r*.7,0,7); ctx.fill(); }
-  // saucers, far ones first
-  for(const u of [...S.ufos].sort((a,b)=>b.dist-a.dist)){ const x=wrap(u.yaw-o.yaw)*ppd, y=hy-(u.el+Math.sin(u.bob)*1.5)*ppd; if(Math.abs(x)>big) continue; drawUfo(x,y,cw*3.2/u.dist,u.alive); }
   ctx.fillStyle='#6f8f4a'; ctx.beginPath(); ctx.moveTo(-big,hy+2);
   for(let x=-big;x<=big;x+=cw/40){ ctx.lineTo(x, hy-hill(o.yaw+x/ppd)*ppd*.35); }
   ctx.lineTo(big,hy+2); ctx.fill();
@@ -276,10 +283,15 @@ function drawOutside(){
       ctx.fillStyle=(k%5===0)?'#f2d13b':(k%7===0)?'#e9eef4':'#3f6b2b';
       if(k%5===0||k%7===0){ ctx.beginPath(); ctx.arc(xx,y,sc*cw*.006+1,0,7); ctx.fill(); }
       else { ctx.fillRect(xx,y-sc*cw*.02,Math.max(1,sc*cw*.004),sc*cw*.02); } } }
-  // pangolin in flight, on its thread
-  if((S.phase==='fly'||S.phase==='reel')&&S.shot){ const sh=S.shot, x=wrap(sh.yaw-o.yaw)*ppd, y=hy-sh.el*ppd, r=Math.max(3,cw*2.2/(sh.dist+2));
-    ctx.strokeStyle='#111'; ctx.lineWidth=Math.max(1,2*devicePixelRatio*(1-Math.min(1,sh.dist/200))); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(x,y); ctx.stroke();
-    ctx.save(); ctx.translate(x,y); ctx.rotate(sh.t*9); drawPangBall(r,1); ctx.restore(); }
+  ctx.restore();
+  // saucers and the pangolin in flight live in the box frame, so they project like everything else
+  const bodies=[...S.ufos].map(u=>({u,b:ufoBox(u,o)})).filter(q=>q.b.z>D).sort((a,b)=>b.b.z-a.b.z);
+  for(const {u,b} of bodies){ const [sx,sy,sc]=P(b.x,b.y,b.z); drawUfo(sx,sy,b.r*sc*K,u.alive); }
+  const p=S.pang;
+  if((S.phase==='fly'||S.phase==='reel')&&p.z>D){ const c=S.cannon, m=P(c.x,c.y,c.z+.9), q=P(p.x,p.y,p.z);
+    ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,q);
+    ctx.save(); ctx.translate(q[0],q[1]); ctx.rotate(S.shot?S.shot.t*9:0); drawPangBall(Math.max(2,p.r*q[2]*K),1); ctx.restore(); }
+  ctx.save();
   ctx.restore();
 }
 function drawBox(){
@@ -322,15 +334,24 @@ function drawRobot(r){ shadow(r); const [sx,sy,s]=P(r.x,r.y,r.z), R=r.r*s*K;
   if(r.on){ ctx.strokeStyle='#8d949c'; ctx.lineWidth=R*.25; line([sx-R,sy+R*.2],[sx-R*1.6,sy+R*.6]); line([sx+R,sy+R*.2],[sx+R*1.6,sy+R*.6]); } }
 function drawCannon(){ const c=S.cannon, z0=c.z-.7, z1=c.z+.9, r=.62;
   const a=P(c.x,c.y,z0), b=P(c.x,c.y,z1), ra=r*a[2]*K, rb=r*b[2]*K;
-  ctx.fillStyle='#4b4f55'; ctx.beginPath(); ctx.moveTo(a[0]-ra,a[1]); ctx.lineTo(b[0]-rb,b[1]); ctx.lineTo(b[0]+rb,b[1]); ctx.lineTo(a[0]+ra,a[1]); ctx.fill();
-  ctx.fillStyle='#2b2e33'; ctx.beginPath(); ctx.arc(b[0],b[1],rb,0,7); ctx.fill();          // muzzle (faces the far wall)
-  ctx.strokeStyle='#7c8189'; ctx.lineWidth=rb*.12; ctx.stroke();
-  ctx.fillStyle='#5d626a'; ctx.beginPath(); ctx.arc(a[0],a[1],ra,0,7); ctx.fill();          // breech cap toward the glass
+  // muzzle opening (far end), then the pangolin sitting in it, then the barrel over both, then the near cap
+  ctx.fillStyle='#1e2125'; ctx.beginPath(); ctx.arc(b[0],b[1],rb,0,7); ctx.fill();
+  if(S.corked||S.phase==='fuse'){ const m=P(c.x,c.y,z1+.25); ctx.save(); ctx.translate(m[0],m[1]); drawPangBall(.45*m[2]*K,1); ctx.restore(); }
+  ctx.fillStyle='#4b4f55'; ctx.beginPath();
+  ctx.moveTo(a[0]-ra,a[1]); ctx.lineTo(b[0]-rb,b[1]); ctx.arc(b[0],b[1],rb,Math.PI,0); ctx.lineTo(a[0]+ra,a[1]); ctx.arc(a[0],a[1],ra,0,Math.PI); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='#7c8189'; ctx.lineWidth=rb*.1; ctx.beginPath(); ctx.arc(b[0],b[1],rb,Math.PI,0); ctx.stroke();   // muzzle rim highlight
+  ctx.fillStyle='#5d626a'; ctx.beginPath(); ctx.arc(a[0],a[1],ra,0,7); ctx.fill();
   ctx.fillStyle='#8a8f97'; ctx.beginPath(); ctx.arc(a[0]-ra*.3,a[1]-ra*.3,ra*.25,0,7); ctx.fill();
-  if(S.corked){ const m=P(c.x,c.y,z1+.15); ctx.save(); ctx.translate(m[0],m[1]); drawPangBall(.45*m[2]*K,1); ctx.restore(); } }
+  // fuse: curls up from the top of the breech, burns down during the fuse phase
+  const burn=S.phase==='fuse'?Math.min(1,S.pt/1.3):0, L=1-burn, fx=a[0], fy=a[1]-ra;
+  if(S.corked||S.phase==='fuse'){ ctx.strokeStyle='#c9b48a'; ctx.lineWidth=Math.max(2,ra*.08); ctx.beginPath(); ctx.moveTo(fx,fy);
+    const n=Math.max(1,Math.round(24*L)); let tipx=fx,tipy=fy;
+    for(let i=1;i<=n;i++){ const t=i/24; tipx=fx+ra*.9*Math.sin(t*4)*t; tipy=fy-ra*1.3*t; ctx.lineTo(tipx,tipy); } ctx.stroke();
+    if(burn>0){ ctx.fillStyle='#ff9a1f'; ctx.beginPath(); ctx.arc(tipx,tipy,ra*.16+Math.random()*ra*.08,0,7); ctx.fill();
+      ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(tipx,tipy,ra*.07,0,7); ctx.fill(); } } }
 function drawPangBall(R,alpha){ ctx.globalAlpha=alpha; ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.arc(0,0,R,0,7); ctx.fill();
   ctx.strokeStyle='#6d4318'; ctx.lineWidth=Math.max(1,R*.12); for(let i=0;i<4;i++){ ctx.beginPath(); ctx.arc(0,0,R*(.35+i*.2),i*.7,i*.7+2.4); ctx.stroke(); } ctx.globalAlpha=1; }
-function drawPang(p){ if(S.corked||S.phase==='fly'||S.phase==='reel') return; shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
+function drawPang(p){ if(S.corked||S.phase==='fuse'||S.phase==='fly'||S.phase==='reel') return; shadow(p); const [sx,sy,s]=P(p.x,p.y,p.z), R=p.r*s*K;
   ctx.save(); ctx.translate(sx,sy); if(!p.alive) ctx.globalAlpha=.5;
   if(p.rolling){ ctx.rotate((p.z+p.x)*3); drawPangBall(R,p.alive?1:.5); }
   else { ctx.rotate(Math.atan2(grav.x,grav.y)*-1);
@@ -341,15 +362,19 @@ function drawPang(p){ if(S.corked||S.phase==='fly'||S.phase==='reel') return; sh
     ctx.fillStyle='#2a1d14'; ctx.beginPath(); ctx.arc(-R*1.5,R*.15,R*.08,0,7); ctx.fill();
     ctx.fillStyle='#a8702f'; ctx.beginPath(); ctx.moveTo(R*1.1,0); ctx.lineTo(R*2.1,R*.3); ctx.lineTo(R*1.1,R*.5); ctx.fill(); }
   ctx.restore(); }
-function drawReticle(){ if(!S.corked||S.phase!=='play') return; const r=cw*.06;
+function drawReticle(){ if(!S.corked||(S.phase!=='play'&&S.phase!=='fuse')) return; const r=cw*.06;
   ctx.strokeStyle='rgba(255,60,60,.9)'; ctx.lineWidth=2*devicePixelRatio;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
   for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) line([cx+dx*r*.5,cy+dy*r*.5],[cx+dx*r*1.5,cy+dy*r*1.5]);
   if(S.charging||S.charge>0){ ctx.strokeStyle='#ffdd57'; ctx.lineWidth=5*devicePixelRatio; ctx.beginPath(); ctx.arc(cx,cy,r*1.9,-Math.PI/2,-Math.PI/2+S.charge*Math.PI*2); ctx.stroke(); } }
 function drawThreadRetract(){ if(S.phase!=='retract') return; const c=S.cannon, m=P(c.x,c.y,c.z+.9), far=[cx,cy], k=1-Math.min(1,S.pt/.6);
   ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,[m[0]+(far[0]-m[0])*k,m[1]+(far[1]-m[1])*k]); }
-function drawThreadInBox(){ if(S.phase!=='fly'&&S.phase!=='reel') return; const c=S.cannon, m=P(c.x,c.y,c.z+.9);
-  ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,[cx,cy]); }
+function drawThreadInBox(){ if(S.phase!=='fly'&&S.phase!=='reel') return; const c=S.cannon, p=S.pang, m=P(c.x,c.y,c.z+.9);
+  let end;
+  if(p.z>D){ const t=(D-(c.z+.9))/(p.z-(c.z+.9)); end=P(c.x+(p.x-c.x)*t, c.y+(p.y-c.y)*t, D); }   // to where the thread exits the far window
+  else { end=P(p.x,p.y,p.z); }
+  ctx.strokeStyle='#111'; ctx.lineWidth=2*devicePixelRatio; line(m,end);
+  if(p.z<=D){ const q=P(p.x,p.y,p.z); ctx.save(); ctx.translate(q[0],q[1]); ctx.rotate(S.shot?S.shot.t*9:0); drawPangBall(p.r*q[2]*K,1); ctx.restore(); } }
 function drawHud(){ const left=S.ufos.filter(u=>u.alive).length, s=13*devicePixelRatio;
   ctx.font=`bold ${s}px Trebuchet MS, sans-serif`; ctx.fillStyle='#e6c58f'; ctx.textAlign='left';
   ctx.shadowColor='#000'; ctx.shadowBlur=3*devicePixelRatio;
