@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v0.8</p>
+  <p style="font-size:13px;opacity:.7">v0.9</p>
   <p>Your phone is a window into a foot-deep box. Tip the phone's top edge toward you to roll things toward the glass. Tip it sideways to steer.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -118,7 +118,7 @@ function toggleMode(){
   modeBtn.textContent=p.rolling?'Uncurl & walk':'Curl & roll';
 }
 dropBtn.onclick=dropBoulder; modeBtn.onclick=toggleMode;
-document.getElementById('reset').onclick=()=>{S=newState(); base=null; dropBtn.textContent='Lay boulder (3)'; modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); say('');};
+document.getElementById('reset').onclick=()=>{S=newState(); base=null; sm=null; dropBtn.textContent='Lay boulder (3)'; modeBtn.textContent='Curl & roll'; modeBtn.classList.remove('on'); say('');};
 function say(t){msg.textContent=t}
 
 // ---------- physics ----------
@@ -173,12 +173,21 @@ function update(dt){
 // ---------- render ----------
 function line(a,b){ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke()}
 function poly(pts,keep){ if(!keep) ctx.beginPath(); pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); }
+let sm=null;
 function orient(){
-  // world-up vector in device frame from alpha/beta/gamma
-  const b=ori.b*Math.PI/180,g=ori.g*Math.PI/180;
-  const ux=-Math.cos(b)*Math.sin(g), uy=Math.sin(b), uz=Math.cos(b)*Math.cos(g);
   if(!base) return {yaw:viewYaw, pitch:viewPitch, roll:0};
-  return { yaw:-ori.a, pitch:Math.atan2(uz,Math.hypot(ux,uy))*180/Math.PI, roll:Math.atan2(ux,uy) };
+  const a=ori.a*Math.PI/180,b=ori.b*Math.PI/180,g=ori.g*Math.PI/180;
+  const ca=Math.cos(a),sa=Math.sin(a),cb=Math.cos(b),sb=Math.sin(b),cg=Math.cos(g),sg=Math.sin(g);
+  // world-up in device frame -> pitch and roll
+  const ux=-cb*sg, uy=sb, uz=cb*cg;
+  const pitch=Math.atan2(uz,Math.hypot(ux,uy))*180/Math.PI, roll=Math.atan2(ux,uy);
+  // where the back of the phone points in the world (device -z axis) -> heading, stable when upright
+  const nx=ca*sg+sa*sb*cg, ny=sa*sg-ca*sb*cg;
+  const yaw=Math.atan2(-nx,-ny)*180/Math.PI;
+  if(!sm){ sm={yaw,pitch,roll}; return sm; }
+  const k=.35, dy=((yaw-sm.yaw+540)%360)-180;
+  sm.yaw=((sm.yaw+dy*k+540)%360)-180; sm.pitch+=(pitch-sm.pitch)*k; sm.roll+=(roll-sm.roll)*k;
+  return sm;
 }
 function hill(deg){ return 14*Math.abs(Math.sin(deg*.05+1))+6*Math.sin(deg*.13)+4*Math.sin(deg*.31); }
 const clouds=[]; for(let i=0;i<24;i++) clouds.push({yaw:i*15+(i*37%11), el:12+(i*53%20), s:.05+((i*17)%5)*.012});
