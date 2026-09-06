@@ -35,7 +35,7 @@
 </div>
 <div id="big">
   <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v1.6</p>
+  <p style="font-size:13px;opacity:.7">v1.7</p>
   <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
   <p>Lay boulders, knock out the barriers and robots, then curl up and roll home.</p>
   <button id="start">Start (allow tilt)</button>
@@ -144,10 +144,11 @@ function orient(){
 }
 
 // ---------- physics ----------
-const G=48, FRIC=.996, MOTION_GAIN=2.2;   // >1 makes phone motion count for more than it reads
+const G=48, FRIC=.996, MOTION_GAIN=2.2, LIFT_GAIN=2.0;   // motion counts for more than it reads; extra when the floor drops away
 function stepBody(b,dt){
   if(b.pinned) return;
-  const f=(performance.now()-accAt<150)?acc:{x:0,y:0,z:0};   // ignore stale sensor data
+  let f=(performance.now()-accAt<150)?acc:{x:0,y:0,z:0};   // ignore stale sensor data
+  if(f.x*grav.x+f.y*grav.y+f.z*grav.z<0) f={x:f.x*LIFT_GAIN,y:f.y*LIFT_GAIN,z:f.z*LIFT_GAIN};   // box moving down relative to gravity
   b.vx+=(grav.x*G+f.x)*dt; b.vy+=(grav.y*G+f.y)*dt; b.vz+=(grav.z*G+f.z)*dt;
   b.vx*=FRIC; b.vy*=FRIC; b.vz*=FRIC;
   b.x+=b.vx*dt; b.y+=b.vy*dt; b.z+=b.vz*dt;
