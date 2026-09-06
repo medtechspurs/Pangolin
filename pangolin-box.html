@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<title>Pangolin — box prototype</title>
+<title>Pangolin — prototype</title>
 <style>
   :root{
     --wood:#8a5a33; --sand:#e6c58f; --clay:#b0461e; --ink:#2a1d14; --moss:#6f8f4a; --wall:#3b2b21;
@@ -36,10 +36,10 @@
   </div>
 </div>
 <div id="big">
-  <h1>Pangolin in a box</h1>
-  <p style="font-size:13px;opacity:.7">v2.4</p>
-  <p>Your phone is the open end of a foot-deep box. Tip and turn the phone and the box goes with it: whatever wall is lowest becomes the floor. Flick the phone to bounce things.</p>
-  <p>Lay boulders, knock out the barriers and robots, then curl up and roll into the cannon. Turn the phone to aim the far window at a saucer, hold Launch to charge, and let go. One shot per level.</p>
+  <h1>Pangolin</h1>
+  <p style="font-size:13px;opacity:.7">v2.6</p>
+  <p>The robots have taken over. Humanity's last hope is the pangolins, who have been hiding one thing: they are very, very smart.</p>
+  <p>Your phone is the open end of a box. Tip and turn it and the box goes with it. Lay boulders to decommission the robots, curl up, roll into the cannon, and aim the far window at a saucer. Hold Launch to charge. One shot per level. Rescue the humans.</p>
   <button id="start">Start (allow tilt)</button>
   <p style="font-size:13px;opacity:.8">On a desktop, use arrow keys or drag.</p>
 </div>
@@ -128,7 +128,10 @@ function fire(){ if(!S.charging) return; S.charging=false;
   S.phase='fuse'; S.pt=0; S.shotScore=0; launchBtn.style.display='none'; say(''); }
 function launchNow(){ const c=S.cannon, p=S.pang;
   S.shot={t:0}; S.corked=false; p.pinned=false; p.rolling=true; p.x=c.x; p.y=c.y; p.z=c.z+1.2;
-  p.vx=0; p.vy=0; p.vz=120+S.charge*380; S.phase='fly'; }
+  const v=launchVel(); p.vx=v.x; p.vy=v.y; p.vz=v.z; S.phase='fly'; }
+function launchVel(){ // from the muzzle through the reticle (far window center), speed from charge
+  const c=S.cannon, dx=0-c.x, dy=0-c.y, dz=D-(c.z+1.2), n=Math.hypot(dx,dy,dz), sp=120+S.charge*380;
+  return {x:dx/n*sp, y:dy/n*sp, z:dz/n*sp}; }
 launchBtn.onpointerdown=e=>{e.preventDefault(); startCharge();};
 addEventListener('pointerup',fire); addEventListener('pointercancel',fire);
 dropBtn.onclick=dropBoulder; modeBtn.onclick=toggleMode;
@@ -380,7 +383,12 @@ function drawMarkers(){ if(!S.corked||S.phase!=='play') return; const o=orient()
     const t=1/Math.max(Math.abs(Math.cos(ang))/rx,Math.abs(Math.sin(ang))/ry), mx=cx+Math.cos(ang)*t, my=cy+Math.sin(ang)*t;
     ctx.save(); ctx.translate(mx,my); ctx.rotate(ang); ctx.fillStyle='#ffdd57'; ctx.beginPath();
     ctx.moveTo(8*devicePixelRatio,0); ctx.lineTo(-5*devicePixelRatio,-6*devicePixelRatio); ctx.lineTo(-5*devicePixelRatio,6*devicePixelRatio); ctx.fill(); ctx.restore(); } }
-function drawReticle(){ if(!S.corked||(S.phase!=='play'&&S.phase!=='fuse')) return; const r=cw*.06;
+function drawPath(){ if(!S.corked||S.phase!=='play') return; const c=S.cannon, v=launchVel();
+  let x=c.x,y=c.y,z=c.z+1.2,vx=v.x,vy=v.y,vz=v.z; const dt=1/30; ctx.fillStyle='rgba(255,221,87,.85)';
+  for(let i=0;i<150;i++){ vx+=grav.x*G*dt; vy+=grav.y*G*dt; vz+=grav.z*G*dt; x+=vx*dt; y+=vy*dt; z+=vz*dt;
+    if(z<D) continue; if(i%3) continue; const [sx,sy,sc]=P(x,y,z); const rr=Math.max(1.5,sc*K*.5); if(z<D+2){ const fi=.5; if(Math.abs(x)>W/2-fi||Math.abs(y)>H/2-fi) break; }
+    ctx.beginPath(); ctx.arc(sx,sy,rr,0,7); ctx.fill(); } }
+function drawReticle(){ if(!S.corked||(S.phase!=='play'&&S.phase!=='fuse')) return; drawPath(); const r=cw*.06;
   ctx.strokeStyle='rgba(255,60,60,.9)'; ctx.lineWidth=2*devicePixelRatio;
   ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
   for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) line([cx+dx*r*.5,cy+dy*r*.5],[cx+dx*r*1.5,cy+dy*r*1.5]);
